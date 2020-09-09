@@ -28,6 +28,7 @@ type Config struct {
 	Cache         *Cache                     `hcl:"cache"`
 	Vault         *Vault                     `hcl:"vault"`
 	Templates     []*ctconfig.TemplateConfig `hcl:"templates"`
+	TokenConfig   *TokenConfig               `hcl:"token_config"`
 }
 
 // Vault contains configuration for connecting to Vault servers
@@ -80,6 +81,10 @@ type Sink struct {
 	AAD        string        `hcl:"aad"`
 	AADEnvVar  string        `hcl:"aad_env_var"`
 	Config     map[string]interface{}
+}
+
+type TokenConfig struct {
+	Secret string `hcl:"secret"`
 }
 
 func NewConfig() *Config {

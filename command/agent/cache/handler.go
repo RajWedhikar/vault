@@ -20,9 +20,15 @@ import (
 	"github.com/hashicorp/vault/sdk/logical"
 )
 
-func Handler(ctx context.Context, logger hclog.Logger, proxier Proxier, inmemSink sink.Sink, proxyVaultToken bool) http.Handler {
+func Handler(ctx context.Context, logger hclog.Logger, proxier Proxier, inmemSink sink.Sink, proxyVaultToken bool, tokenSecret string, authPatterns []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Info("received request", "method", r.Method, "path", r.URL.Path)
+
+		if len(authPatterns) > 0 && !authenticateToken(r, tokenSecret, authPatterns, logger) {
+			logger.Info("unauthorized request with token", "path", r.URL.Path)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
 
 		if !proxyVaultToken {
 			r.Header.Del(consts.AuthHeaderName)

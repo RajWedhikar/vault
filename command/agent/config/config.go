@@ -84,7 +84,9 @@ type Sink struct {
 }
 
 type TokenConfig struct {
-	Secret string `hcl:"secret"`
+	Secret           string   `hcl:"secret"`
+	EnableTokenAuth  bool     `hcl:"enable_token_auth"`
+	AuthPathPatterns []string `hcl:"auth_path_patterns"`
 }
 
 func NewConfig() *Config {

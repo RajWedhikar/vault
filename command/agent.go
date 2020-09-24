@@ -483,8 +483,15 @@ func (c *AgentCommand) Run(args []string) int {
 
 		var proxyVaultToken = !config.Cache.ForceAutoAuthToken
 
+		var authPathPatterns []string = nil
+		var tokenSecret string
+		if config.TokenConfig != nil && config.TokenConfig.EnableTokenAuth {
+			authPathPatterns = config.TokenConfig.AuthPathPatterns
+			tokenSecret = config.TokenConfig.Secret
+		}
+
 		// Create the request handler
-		cacheHandler := cache.Handler(ctx, cacheLogger, leaseCache, inmemSink, proxyVaultToken)
+		cacheHandler := cache.Handler(ctx, cacheLogger, leaseCache, inmemSink, proxyVaultToken, tokenSecret, authPathPatterns)
 
 		var listeners []net.Listener
 		for i, lnConfig := range config.Listeners {

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/vault/command/agent/cache/cachememdb"
 
@@ -105,9 +106,12 @@ func TestLeaseCache_SendCacheable(t *testing.T) {
 	responses := []*SendResponse{
 		newTestSendResponse(http.StatusCreated, `{"auth": {"client_token": "testtoken", "renewable": true}}`),
 		newTestSendResponse(http.StatusOK, `{"lease_id": "foo", "renewable": true, "data": {"value": "foo"}}`),
+		//Static response
+		newTestSendResponse(http.StatusAccepted, `{"lease_id": "", "renewable": false, "lease_duration": 0, "data": {"data": {"value": "static"}}}`),
 	}
 
 	lc := testNewLeaseCache(t, responses)
+	lc.staticSecretDuration = time.Duration(1) * time.Second
 	// Register an token so that the token and lease requests are cached
 	lc.RegisterAutoAuthToken("autoauthtoken")
 
@@ -141,6 +145,7 @@ func TestLeaseCache_SendCacheable(t *testing.T) {
 
 	// Modify the request a little bit to ensure the second response is
 	// returned to the lease cache.
+	urlPath = "http://example.com/v1/sample/api2"
 	sendReq = &SendRequest{
 		Token:   "autoauthtoken",
 		Request: httptest.NewRequest("GET", urlPath, strings.NewReader(`{"value": "input_changed"}`)),
@@ -164,6 +169,35 @@ func TestLeaseCache_SendCacheable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if diff := deep.Equal(resp.Response.StatusCode, responses[1].Response.StatusCode); diff != nil {
+		t.Fatalf("expected getting proxied response: got %v", diff)
+	}
+
+	// Make the same request again and ensure that the same response is returned
+	// again.
+	urlPath = "http://example.com/v1/sample/api3"
+	sendReq = &SendRequest{
+		Token:   "autoauthtoken",
+		Request: httptest.NewRequest("GET", urlPath, strings.NewReader(`{"value": "for_static"}`)),
+	}
+	resp, err = lc.Send(context.Background(), sendReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := deep.Equal(resp.Response.StatusCode, responses[2].Response.StatusCode); diff != nil {
+		t.Fatalf("expected getting proxied response: got %v", diff)
+	}
+
+	// Make the same request again and ensure that the same response is returned
+	// again.
+	sendReq = &SendRequest{
+		Token:   "autoauthtoken",
+		Request: httptest.NewRequest("GET", urlPath, strings.NewReader(`{"value": "for_static"}`)),
+	}
+	resp, err = lc.Send(context.Background(), sendReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := deep.Equal(resp.Response.StatusCode, responses[2].Response.StatusCode); diff != nil {
 		t.Fatalf("expected getting proxied response: got %v", diff)
 	}
 }

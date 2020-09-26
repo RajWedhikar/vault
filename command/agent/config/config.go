@@ -45,9 +45,10 @@ type Vault struct {
 
 // Cache contains any configuration needed for Cache mode
 type Cache struct {
-	UseAutoAuthTokenRaw interface{} `hcl:"use_auto_auth_token"`
-	UseAutoAuthToken    bool        `hcl:"-"`
-	ForceAutoAuthToken  bool        `hcl:"-"`
+	UseAutoAuthTokenRaw           interface{} `hcl:"use_auto_auth_token"`
+	UseAutoAuthToken              bool        `hcl:"-"`
+	ForceAutoAuthToken            bool        `hcl:"-"`
+	StaticSecretDurationInMinutes float64     `hcl:"static_secret_duration_in_minutes"`
 }
 
 // AutoAuth is the configured authentication method and sinks

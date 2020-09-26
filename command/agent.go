@@ -459,6 +459,8 @@ func (c *AgentCommand) Run(args []string) int {
 			BaseContext: ctx,
 			Proxier:     apiProxy,
 			Logger:      cacheLogger.Named("leasecache"),
+			//Multiply minutes by 60 so that we can support a fraction of a minute
+			StaticSecretDuration: time.Duration(float64(config.Cache.StaticSecretDurationInMinutes)*60) * time.Second,
 		})
 		if err != nil {
 			c.UI.Error(fmt.Sprintf("Error creating lease cache: %v", err))

@@ -488,6 +488,10 @@ func (c *AgentCommand) Run(args []string) int {
 		var authPathPatterns []string = nil
 		var tokenSecret string
 		if config.TokenConfig != nil && config.TokenConfig.EnableTokenAuth {
+			if s, valid := config.TokenConfig.ValidatePatterns(); !valid {
+				c.UI.Error(fmt.Sprintf("Invalid token_config - auth_path_patterns in the config file. Only one ':identifier' per pattern is allowed: '%s'", s))
+				return 1
+			}
 			authPathPatterns = config.TokenConfig.AuthPathPatterns
 			tokenSecret = config.TokenConfig.Secret
 		}

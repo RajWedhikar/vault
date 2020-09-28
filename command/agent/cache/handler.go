@@ -24,7 +24,7 @@ func Handler(ctx context.Context, logger hclog.Logger, proxier Proxier, inmemSin
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		logger.Info("received request", "method", r.Method, "path", r.URL.Path)
 
-		if len(authPatterns) > 0 && !authenticateToken(r, tokenSecret, authPatterns, logger) {
+		if len(authPatterns) > 0 && !authenticateToken(r, tokenSecret, authPatterns) {
 			logger.Info("unauthorized request with token", "path", r.URL.Path)
 			w.WriteHeader(http.StatusForbidden)
 			return

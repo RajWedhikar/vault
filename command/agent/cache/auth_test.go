@@ -2,14 +2,10 @@ package cache
 
 import (
 	"testing"
-
-	hclog "github.com/hashicorp/go-hclog"
-	"github.com/hashicorp/vault/sdk/helper/logging"
 )
 
 func extractIdentifierMatch(t *testing.T, identifier, path string, patterns []string) {
-	logger := logging.NewVaultLogger(hclog.Trace)
-	id, match := extractIdentifier(path, patterns, logger)
+	id, match := extractIdentifier(path, patterns)
 	if id != identifier {
 		t.Error("Failed to extract identifier", "id", id)
 	}
@@ -19,8 +15,7 @@ func extractIdentifierMatch(t *testing.T, identifier, path string, patterns []st
 }
 
 func extractIdentifierNoMatch(t *testing.T, path string, patterns []string) {
-	logger := logging.NewVaultLogger(hclog.Trace)
-	id, match := extractIdentifier(path, patterns, logger)
+	id, match := extractIdentifier(path, patterns)
 	if id != "" {
 		t.Error("Extract identifier should have not have identifier", "id", id)
 	}
@@ -63,8 +58,7 @@ func TestAuth_ExtractIdentifier(t *testing.T) {
 }
 
 func matchPatternsPass(t *testing.T, identity string, values, patterns []string) {
-	logger := logging.NewVaultLogger(hclog.Trace)
-	id, match := matchPatterns(values, patterns, logger)
+	id, match := matchPatterns(values, patterns)
 	if id != identity {
 		t.Error("Failed to match patterns", "id", id)
 	}
@@ -74,8 +68,7 @@ func matchPatternsPass(t *testing.T, identity string, values, patterns []string)
 }
 
 func matchPatternsFail(t *testing.T, values, patterns []string) {
-	logger := logging.NewVaultLogger(hclog.Trace)
-	id, match := matchPatterns(values, patterns, logger)
+	id, match := matchPatterns(values, patterns)
 	if id != "" {
 		t.Error("Failed to match patterns", "id", id)
 	}

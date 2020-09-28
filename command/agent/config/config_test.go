@@ -642,3 +642,37 @@ func TestLoadConfigFile_Template_NoSinks(t *testing.T) {
 		})
 	}
 }
+
+func TestTokenConfig_ValidatePatterns(t *testing.T) {
+	expectAuthPatternsValid(t, []string{"a/b/c/:identifier"})
+	expectAuthPatternsValid(t, []string{":identifier"})
+	expectAuthPatternsValid(t, []string{":identifier/a"})
+	expectAuthPatternsValid(t, []string{"a/b/:identifier/", "a/:identifier/b"})
+
+	expectAuthPatternsInvalid(t, []string{"a/b/c/:identifierer"})
+	expectAuthPatternsInvalid(t, []string{":identifier/b/c/:identifier"})
+	expectAuthPatternsInvalid(t, []string{":identifier/b/c/:identifier/:identifier"})
+	expectAuthPatternsInvalid(t, []string{"a/b/c", "d/e/f"})
+}
+
+func expectAuthPatternsValid(t *testing.T, patterns []string) {
+	tc := &TokenConfig{AuthPathPatterns: patterns}
+	p, valid := tc.ValidatePatterns()
+	if !valid {
+		t.Fatalf("Expected patterns %s to be valid", patterns)
+	}
+	if p != "" {
+		t.Fatalf("Expected valid patterns %s not to return an invalid pattern: %s", patterns, p)
+	}
+}
+
+func expectAuthPatternsInvalid(t *testing.T, patterns []string) {
+	tc := &TokenConfig{AuthPathPatterns: patterns}
+	p, valid := tc.ValidatePatterns()
+	if valid {
+		t.Fatalf("Expected patterns %s to be invalid", patterns)
+	}
+	if p == "" {
+		t.Fatalf("Expected invalid patterns %s return an invalid pattern", patterns)
+	}
+}

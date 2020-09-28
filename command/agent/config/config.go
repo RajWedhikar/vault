@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/hcl/hcl/ast"
 	"github.com/hashicorp/vault/helper/namespace"
 	"github.com/hashicorp/vault/internalshared/configutil"
+	"github.com/hashicorp/vault/sdk/helper/consts"
 	"github.com/hashicorp/vault/sdk/helper/parseutil"
 	"github.com/mitchellh/mapstructure"
 )
@@ -88,6 +89,25 @@ type TokenConfig struct {
 	Secret           string   `hcl:"secret"`
 	EnableTokenAuth  bool     `hcl:"enable_token_auth"`
 	AuthPathPatterns []string `hcl:"auth_path_patterns"`
+}
+
+func (tc *TokenConfig) ValidatePatterns() (string, bool) {
+	for _, p := range tc.AuthPathPatterns {
+		if !tc.validatePattern(p) {
+			return p, false
+		}
+	}
+	return "", true
+}
+
+func (tc *TokenConfig) validatePattern(p string) bool {
+	count := 0
+	for _, seg := range strings.Split(p, "/") {
+		if seg == consts.AuthPatternIdentifier {
+			count++
+		}
+	}
+	return count == 1
 }
 
 func NewConfig() *Config {

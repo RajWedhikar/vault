@@ -76,14 +76,16 @@ const (
 type LifetimeWatcher struct {
 	l sync.Mutex
 
-	client        *Client
-	secret        *Secret
-	grace         time.Duration
-	random        *rand.Rand
-	increment     int
-	doneCh        chan error
-	renewCh       chan *RenewOutput
-	renewBehavior RenewBehavior
+	client               *Client
+	secret               *Secret
+	grace                time.Duration
+	random               *rand.Rand
+	increment            int
+	doneCh               chan error
+	renewCh              chan *RenewOutput
+	renewBehavior        RenewBehavior
+	staticSecretDuration time.Duration
+	staticResetCh        chan error
 
 	stopped bool
 	stopCh  chan struct{}
@@ -117,6 +119,8 @@ type LifetimeWatcherInput struct {
 	// RenewBehavior controls what happens when a renewal errors or the
 	// passed-in secret is not renewable.
 	RenewBehavior RenewBehavior
+
+	StaticSecretDuration time.Duration
 }
 
 // RenewOutput is the metadata returned to the client (if it's listening) to
@@ -153,13 +157,15 @@ func (c *Client) NewLifetimeWatcher(i *LifetimeWatcherInput) (*LifetimeWatcher, 
 	}
 
 	return &LifetimeWatcher{
-		client:        c,
-		secret:        secret,
-		increment:     i.Increment,
-		random:        random,
-		doneCh:        make(chan error, 1),
-		renewCh:       make(chan *RenewOutput, renewBuffer),
-		renewBehavior: i.RenewBehavior,
+		client:               c,
+		secret:               secret,
+		increment:            i.Increment,
+		random:               random,
+		doneCh:               make(chan error, 1),
+		renewCh:              make(chan *RenewOutput, renewBuffer),
+		renewBehavior:        i.RenewBehavior,
+		staticSecretDuration: i.StaticSecretDuration,
+		staticResetCh:        make(chan error, 1),
 
 		stopped: false,
 		stopCh:  make(chan struct{}),
@@ -204,6 +210,10 @@ func (r *LifetimeWatcher) RenewCh() <-chan *RenewOutput {
 	return r.renewCh
 }
 
+func (r *LifetimeWatcher) StaticResetCh() <-chan error {
+	return r.staticResetCh
+}
+
 // Stop stops the renewer.
 func (r *LifetimeWatcher) Stop() {
 	r.l.Lock()
@@ -223,10 +233,25 @@ func (r *LifetimeWatcher) Start() {
 	r.doneCh <- r.doRenew()
 }
 
+func (r *LifetimeWatcher) StartStaticCheck() {
+	r.staticResetCh <- r.doStaticCheck()
+}
+
 // Renew is for comnpatibility with the legacy api.Renewer. Calling Renew
 // simply chains to Start.
 func (r *LifetimeWatcher) Renew() {
 	r.Start()
+}
+
+func (r *LifetimeWatcher) doStaticCheck() error {
+	for {
+		select {
+		case <-r.stopCh:
+			return nil
+		case <-time.After(r.staticSecretDuration):
+			return nil
+		}
+	}
 }
 
 // renewAuth is a helper for renewing authentication.

@@ -34,4 +34,5 @@ const (
 	ReplicationResolverALPN = "replication_resolver_v1"
 
 	RequestHeaderVaultAgentToken = "X-Vault-Agent-Token"
+	AuthPatternIdentifier        = ":identifier"
 )

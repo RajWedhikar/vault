@@ -78,15 +78,18 @@ type LeaseCache struct {
 	// idLocks is used during cache lookup to ensure that identical requests made
 	// in parallel won't trigger multiple renewal goroutines.
 	idLocks []*locksutil.LockEntry
+
+	staticSecretDuration time.Duration
 }
 
 // LeaseCacheConfig is the configuration for initializing a new
 // Lease.
 type LeaseCacheConfig struct {
-	Client      *api.Client
-	BaseContext context.Context
-	Proxier     Proxier
-	Logger      hclog.Logger
+	Client               *api.Client
+	BaseContext          context.Context
+	Proxier              Proxier
+	Logger               hclog.Logger
+	StaticSecretDuration time.Duration
 }
 
 // NewLeaseCache creates a new instance of a LeaseCache.
@@ -112,13 +115,14 @@ func NewLeaseCache(conf *LeaseCacheConfig) (*LeaseCache, error) {
 	baseCtxInfo := cachememdb.NewContextInfo(conf.BaseContext)
 
 	return &LeaseCache{
-		client:      conf.Client,
-		proxier:     conf.Proxier,
-		logger:      conf.Logger,
-		db:          db,
-		baseCtxInfo: baseCtxInfo,
-		l:           &sync.RWMutex{},
-		idLocks:     locksutil.CreateLocks(),
+		client:               conf.Client,
+		proxier:              conf.Proxier,
+		logger:               conf.Logger,
+		db:                   db,
+		baseCtxInfo:          baseCtxInfo,
+		l:                    &sync.RWMutex{},
+		idLocks:              locksutil.CreateLocks(),
+		staticSecretDuration: conf.StaticSecretDuration,
 	}, nil
 }
 
@@ -264,13 +268,23 @@ func (c *LeaseCache) Send(ctx context.Context, req *SendRequest) (*SendResponse,
 		c.logger.Error("failed to parse renewable param", "error", err)
 		return nil, err
 	}
+	var isStaticSecret bool
 	if !secret.Renewable && !tokenRenewable {
 		c.logger.Debug("pass-through response; secret not renewable", "method", req.Request.Method, "path", req.Request.URL.Path)
-		return resp, nil
+		if req.Request.Method != "GET" || c.staticSecretDuration <= 0 {
+			return resp, nil
+		}
+		//We will cache the response for static secrets
+		isStaticSecret = true
 	}
 
 	var renewCtxInfo *cachememdb.ContextInfo
 	switch {
+	case isStaticSecret:
+		renewCtxInfo = c.createCtxInfo(nil)
+
+		index.Lease = req.Request.URL.Path
+		index.LeaseToken = req.Token
 	case secret.LeaseID != "":
 		c.logger.Debug("processing lease response", "method", req.Request.Method, "path", req.Request.URL.Path)
 		entry, err := c.db.Get(cachememdb.IndexNameToken, req.Token)
@@ -361,7 +375,7 @@ func (c *LeaseCache) Send(ctx context.Context, req *SendRequest) (*SendResponse,
 	}
 
 	// Start renewing the secret in the response
-	go c.startRenewing(renewCtx, index, req, secret)
+	go c.startRenewing(renewCtx, index, req, secret, isStaticSecret)
 
 	return resp, nil
 }
@@ -375,10 +389,10 @@ func (c *LeaseCache) createCtxInfo(ctx context.Context) *cachememdb.ContextInfo 
 	return cachememdb.NewContextInfo(ctx)
 }
 
-func (c *LeaseCache) startRenewing(ctx context.Context, index *cachememdb.Index, req *SendRequest, secret *api.Secret) {
+func (c *LeaseCache) startRenewing(ctx context.Context, index *cachememdb.Index, req *SendRequest, secret *api.Secret, isStatic bool) {
 	defer func() {
 		id := ctx.Value(contextIndexID).(string)
-		c.logger.Debug("evicting index from cache", "id", id, "method", req.Request.Method, "path", req.Request.URL.Path)
+		c.logger.Info("evicting index from cache", "id", id, "method", req.Request.Method, "path", req.Request.URL.Path)
 		err := c.db.Evict(cachememdb.IndexNameID, id)
 		if err != nil {
 			c.logger.Error("failed to evict index", "id", id, "error", err)
@@ -395,7 +409,8 @@ func (c *LeaseCache) startRenewing(ctx context.Context, index *cachememdb.Index,
 	client.SetHeaders(req.Request.Header)
 
 	watcher, err := client.NewLifetimeWatcher(&api.LifetimeWatcherInput{
-		Secret: secret,
+		Secret:               secret,
+		StaticSecretDuration: c.staticSecretDuration,
 	})
 	if err != nil {
 		c.logger.Error("failed to create secret lifetime watcher", "error", err)
@@ -403,7 +418,11 @@ func (c *LeaseCache) startRenewing(ctx context.Context, index *cachememdb.Index,
 	}
 
 	c.logger.Debug("initiating renewal", "method", req.Request.Method, "path", req.Request.URL.Path)
-	go watcher.Start()
+	if isStatic {
+		go watcher.StartStaticCheck()
+	} else {
+		go watcher.Start()
+	}
 	defer watcher.Stop()
 
 	for {
@@ -423,7 +442,18 @@ func (c *LeaseCache) startRenewing(ctx context.Context, index *cachememdb.Index,
 			c.logger.Debug("renewal halted; evicting from cache", "path", req.Request.URL.Path)
 			return
 		case <-watcher.RenewCh():
-			c.logger.Debug("secret renewed", "path", req.Request.URL.Path)
+			c.logger.Info("secret renewed", "path", req.Request.URL.Path)
+		case <-watcher.StaticResetCh():
+			c.logger.Debug("time to evict cache for", "path", req.Request.URL.Path)
+			//Check Vault server health by trying the original request
+			_, err := c.proxier.Send(ctx, req)
+			if err == nil {
+				c.logger.Info("Vault server healthy, proceed to evicting cache for", "path", req.Request.URL.Path)
+				return
+			}
+			c.logger.Warn("Vault server unhealthy, keep the cache and re-launch static secret watcher for", "path", req.Request.URL.Path)
+			//Start another round of watcher check, since server is now unhealthy
+			go watcher.StartStaticCheck()
 		case <-index.RenewCtxInfo.DoneCh:
 			// This case indicates the renewal process to shutdown and evict
 			// the cache entry. This is triggered when a specific secret

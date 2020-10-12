@@ -17,6 +17,7 @@ EXTERNAL_TOOLS_CI=\
 EXTERNAL_TOOLS=\
 	github.com/client9/misspell/cmd/misspell
 GOFMT_FILES?=$$(find . -name '*.go' | grep -v pb.go | grep -v vendor)
+DIST_DIR=$(realpath .)/dist
 
 ifdef BUILD_NUMBER
 	BUILD_IDENTIFIER = _${BUILD_NUMBER}
@@ -66,8 +67,9 @@ docker-dev-ui: prep
 docker.build: clean
 	docker build -f scripts/docker/Dockerfile-builder -t vault_bin${BUILD_IDENTIFIER} .
 	docker create -it --name tocopy-vault${BUILD_IDENTIFIER} vault_bin${BUILD_IDENTIFIER} sh
-	docker cp tocopy-vault${BUILD_IDENTIFIER}:go/src/vault/pkg $(realpath .)/dist/
-	docker cp tocopy-vault${BUILD_IDENTIFIER}:go/src/vault/bin $(realpath .)/dist/
+	mkdir -p ${DIST_DIR}
+	docker cp tocopy-vault${BUILD_IDENTIFIER}:go/src/vault/pkg ${DIST_DIR}
+	docker cp tocopy-vault${BUILD_IDENTIFIER}:go/src/vault/bin ${DIST_DIR}
 	docker rm -f tocopy-vault${BUILD_IDENTIFIER}
 	docker rmi -f vault_bin${BUILD_IDENTIFIER}
 

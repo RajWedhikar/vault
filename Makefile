@@ -63,7 +63,7 @@ docker-dev: prep
 docker-dev-ui: prep
 	docker build -f scripts/docker/Dockerfile.ui -t vault:dev-ui .
 
-docker.build: clean prep
+docker.build: clean
 	docker build -f scripts/docker/Dockerfile-builder -t vault_bin${BUILD_IDENTIFIER} .
 	docker create -it --name tocopy-vault${BUILD_IDENTIFIER} vault_bin${BUILD_IDENTIFIER} sh
 	docker cp tocopy-vault${BUILD_IDENTIFIER}:go/src/vault/pkg $(realpath .)/dist/

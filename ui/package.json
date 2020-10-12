@@ -172,7 +172,7 @@
     "serialize-javascript": "^2.1.1"
   },
   "engines": {
-    "node": " >= 10.* <11"
+    "node": " >= 10.*"
   },
   "private": true,
   "ember-addon": {

@@ -4,6 +4,7 @@ FROM golang:${VERSION}
 
 ARG CGO_ENABLED=0
 ARG BUILD_TAGS
+ARG XC_OSARCH="linux/amd64 darwin/amd64"
 
 RUN apk add --update nodejs-npm yarn zip make git bash
 
@@ -12,4 +13,4 @@ COPY . .
 
 RUN make bootstrap
 RUN make static-dist
-RUN XC_OSARCH="linux/amd64 darwin/amd64" make bin
+RUN XC_OSARCH="${XC_OSARCH}" make bin

@@ -19,6 +19,10 @@ EXTERNAL_TOOLS=\
 GOFMT_FILES?=$$(find . -name '*.go' | grep -v pb.go | grep -v vendor)
 DIST_DIR=$(realpath .)/dist
 
+ifdef XC_OSARCH
+	DOCKER_BUILD_ARGS = --build-arg XC_OSARCH="${XC_OSARCH}"
+endif
+
 ifdef BUILD_NUMBER
 	BUILD_IDENTIFIER = _${BUILD_NUMBER}
 endif
@@ -65,7 +69,7 @@ docker-dev-ui: prep
 	docker build -f scripts/docker/Dockerfile.ui -t vault:dev-ui .
 
 docker.build: clean
-	docker build -f scripts/docker/Dockerfile-builder -t vault_bin${BUILD_IDENTIFIER} .
+	docker build -f scripts/docker/Dockerfile-builder -t vault_bin${BUILD_IDENTIFIER} ${DOCKER_BUILD_ARGS} .
 	docker create -it --name tocopy-vault${BUILD_IDENTIFIER} vault_bin${BUILD_IDENTIFIER} sh
 	mkdir -p ${DIST_DIR}
 	docker cp tocopy-vault${BUILD_IDENTIFIER}:go/src/vault/pkg ${DIST_DIR}

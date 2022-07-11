@@ -19,6 +19,7 @@ import (
 	hclog "github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/vault/api"
 	cachememdb "github.com/hashicorp/vault/command/agent/cache/cachememdb"
+	"github.com/hashicorp/vault/command/agent/sink"
 	"github.com/hashicorp/vault/helper/namespace"
 	nshelper "github.com/hashicorp/vault/helper/namespace"
 	"github.com/hashicorp/vault/sdk/helper/base62"
@@ -40,6 +41,12 @@ const (
 	vaultPathLeaseRevoke         = "/v1/sys/leases/revoke"
 	vaultPathLeaseRevokeForce    = "/v1/sys/leases/revoke-force"
 	vaultPathLeaseRevokePrefix   = "/v1/sys/leases/revoke-prefix"
+
+	//For cache eviction health checking the Vault server, default values are to check
+	//every hour for up to 2 days. This assumes if the Vault server is down, hopefully
+	//it'll get restored within an hour.
+	defaultStaticRetryDuration = 1 * time.Hour
+	defaultStaticMaxRetryCount = 72
 )
 
 var (
@@ -74,22 +81,27 @@ type LeaseCache struct {
 	db          *cachememdb.CacheMemDB
 	baseCtxInfo *cachememdb.ContextInfo
 	l           *sync.RWMutex
+	Sink        sink.Sink
 
 	// idLocks is used during cache lookup to ensure that identical requests made
 	// in parallel won't trigger multiple renewal goroutines.
 	idLocks []*locksutil.LockEntry
 
-	staticSecretDuration time.Duration
+	staticSecretDuration      time.Duration
+	staticSecretRetryDuration time.Duration
+	staticSecretMaxRetryCount int
 }
 
 // LeaseCacheConfig is the configuration for initializing a new
 // Lease.
 type LeaseCacheConfig struct {
-	Client               *api.Client
-	BaseContext          context.Context
-	Proxier              Proxier
-	Logger               hclog.Logger
-	StaticSecretDuration time.Duration
+	Client                    *api.Client
+	BaseContext               context.Context
+	Proxier                   Proxier
+	Logger                    hclog.Logger
+	StaticSecretDuration      time.Duration
+	StaticSecretRetryDuration time.Duration
+	StaticSecretMaxRetryCount int
 }
 
 // NewLeaseCache creates a new instance of a LeaseCache.
@@ -111,18 +123,29 @@ func NewLeaseCache(conf *LeaseCacheConfig) (*LeaseCache, error) {
 		return nil, err
 	}
 
+	staticSecretRetryDuration := defaultStaticRetryDuration
+	if conf.StaticSecretRetryDuration > 0 {
+		staticSecretRetryDuration = conf.StaticSecretRetryDuration
+	}
+	staticSecretMaxRetryCount := defaultStaticMaxRetryCount
+	if conf.StaticSecretMaxRetryCount > 0 {
+		staticSecretMaxRetryCount = conf.StaticSecretMaxRetryCount
+	}
+
 	// Create a base context for the lease cache layer
 	baseCtxInfo := cachememdb.NewContextInfo(conf.BaseContext)
 
 	return &LeaseCache{
-		client:               conf.Client,
-		proxier:              conf.Proxier,
-		logger:               conf.Logger,
-		db:                   db,
-		baseCtxInfo:          baseCtxInfo,
-		l:                    &sync.RWMutex{},
-		idLocks:              locksutil.CreateLocks(),
-		staticSecretDuration: conf.StaticSecretDuration,
+		client:                    conf.Client,
+		proxier:                   conf.Proxier,
+		logger:                    conf.Logger,
+		db:                        db,
+		baseCtxInfo:               baseCtxInfo,
+		l:                         &sync.RWMutex{},
+		idLocks:                   locksutil.CreateLocks(),
+		staticSecretDuration:      conf.StaticSecretDuration,
+		staticSecretRetryDuration: staticSecretRetryDuration,
+		staticSecretMaxRetryCount: staticSecretMaxRetryCount,
 	}, nil
 }
 
@@ -268,22 +291,22 @@ func (c *LeaseCache) Send(ctx context.Context, req *SendRequest) (*SendResponse,
 		c.logger.Error("failed to parse renewable param", "error", err)
 		return nil, err
 	}
-	var isStaticSecret bool
+
+	isStaticSecret := isStaticSecretGetRequest(req)
 	if !secret.Renewable && !tokenRenewable {
 		c.logger.Debug("pass-through response; secret not renewable", "method", req.Request.Method, "path", req.Request.URL.Path)
-		if req.Request.Method != "GET" || c.staticSecretDuration <= 0 {
+		if !isStaticSecret || c.staticSecretDuration <= 0 {
 			return resp, nil
 		}
-		//We will cache the response for static secrets
-		isStaticSecret = true
 	}
 
 	var renewCtxInfo *cachememdb.ContextInfo
 	switch {
 	case isStaticSecret:
+		c.logger.Info("Storing static secret in cache", "path", req.Request.URL.RequestURI())
 		renewCtxInfo = c.createCtxInfo(nil)
 
-		index.Lease = req.Request.URL.Path
+		index.Lease = req.Request.URL.RequestURI()
 		index.LeaseToken = req.Token
 	case secret.LeaseID != "":
 		c.logger.Debug("processing lease response", "method", req.Request.Method, "path", req.Request.URL.Path)
@@ -425,6 +448,7 @@ func (c *LeaseCache) startRenewing(ctx context.Context, index *cachememdb.Index,
 	}
 	defer watcher.Stop()
 
+	staticSecretRetryCount := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -444,14 +468,30 @@ func (c *LeaseCache) startRenewing(ctx context.Context, index *cachememdb.Index,
 		case <-watcher.RenewCh():
 			c.logger.Info("secret renewed", "path", req.Request.URL.Path)
 		case <-watcher.StaticResetCh():
-			c.logger.Debug("time to evict cache for", "path", req.Request.URL.Path)
+			c.logger.Debug("time to evict cache for", "path", req.Request.URL.RequestURI())
+
+			if c.Sink != nil {
+				req.Token = c.Sink.(sink.SinkReader).Token()
+			}
 			//Check Vault server health by trying the original request
-			_, err := c.proxier.Send(ctx, req)
+			resp, err := c.proxier.Send(ctx, req)
 			if err == nil {
-				c.logger.Info("Vault server healthy, proceed to evicting cache for", "path", req.Request.URL.Path)
+				c.logger.Info("Vault server healthy, proceed to evicting cache", "path", req.Request.URL.RequestURI())
 				return
 			}
-			c.logger.Warn("Vault server unhealthy, keep the cache and re-launch static secret watcher for", "path", req.Request.URL.Path)
+			if resp != nil && resp.Response.StatusCode == 404 {
+				c.logger.Info("Secret not found on Vault server, proceed to evicting cache", "path", req.Request.URL.RequestURI())
+				return
+			}
+			if staticSecretRetryCount >= c.staticSecretMaxRetryCount {
+				c.logger.Warn("Vault server still unhealthy, give up and evict the cache", "path", req.Request.URL.RequestURI(), "noOfRetries", staticSecretRetryCount, "retryWaitTime", c.staticSecretRetryDuration, "error", err)
+				return
+			}
+			c.logger.Warn("Vault server unhealthy, keep the cache and re-launch static secret watcher", "path", req.Request.URL.RequestURI(), "retry", staticSecretRetryCount, "error", err)
+
+			staticSecretRetryCount++
+			//Adjust the frequency that the watcher checks for the health of Vault server and evicting the cache.
+			watcher.StaticSecretDuration = c.staticSecretRetryDuration
 			//Start another round of watcher check, since server is now unhealthy
 			go watcher.StartStaticCheck()
 		case <-index.RenewCtxInfo.DoneCh:
@@ -471,6 +511,11 @@ func (c *LeaseCache) startRenewing(ctx context.Context, index *cachememdb.Index,
 func computeIndexID(req *SendRequest) (string, error) {
 	var b bytes.Buffer
 
+	if isStaticSecretGetRequest(req) {
+		//For static secrets, we use the "path?query=..." portion as the index
+		return hex.EncodeToString(cryptoutil.Blake2b256Hash(req.Request.URL.RequestURI())), nil
+	}
+
 	// Serialze the request
 	if err := req.Request.Write(&b); err != nil {
 		return "", fmt.Errorf("failed to serialize request: %v", err)
@@ -484,6 +529,17 @@ func computeIndexID(req *SendRequest) (string, error) {
 	b.Write([]byte(req.Token))
 
 	return hex.EncodeToString(cryptoutil.Blake2b256Hash(string(b.Bytes()))), nil
+}
+
+//For static secret, the request method must be GET method, and the path must
+//start with v1/secret/data
+func isStaticSecretGetRequest(req *SendRequest) bool {
+	if req.Request.Method != "GET" {
+		return false
+	}
+	path := strings.TrimLeft(req.Request.URL.Path, "/")
+	// We get secrets with v1/secret/data/ and not v1/secret
+	return strings.HasPrefix(path, "v1/secret/data/")
 }
 
 // HandleCacheClear returns a handlerFunc that can perform cache clearing operations.

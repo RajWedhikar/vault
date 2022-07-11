@@ -84,7 +84,7 @@ type LifetimeWatcher struct {
 	doneCh               chan error
 	renewCh              chan *RenewOutput
 	renewBehavior        RenewBehavior
-	staticSecretDuration time.Duration
+	StaticSecretDuration time.Duration
 	staticResetCh        chan error
 
 	stopped bool
@@ -164,7 +164,7 @@ func (c *Client) NewLifetimeWatcher(i *LifetimeWatcherInput) (*LifetimeWatcher, 
 		doneCh:               make(chan error, 1),
 		renewCh:              make(chan *RenewOutput, renewBuffer),
 		renewBehavior:        i.RenewBehavior,
-		staticSecretDuration: i.StaticSecretDuration,
+		StaticSecretDuration: i.StaticSecretDuration,
 		staticResetCh:        make(chan error, 1),
 
 		stopped: false,
@@ -248,7 +248,7 @@ func (r *LifetimeWatcher) doStaticCheck() error {
 		select {
 		case <-r.stopCh:
 			return nil
-		case <-time.After(r.staticSecretDuration):
+		case <-time.After(r.StaticSecretDuration):
 			return nil
 		}
 	}

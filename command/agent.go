@@ -452,6 +452,16 @@ func (c *AgentCommand) Run(args []string) int {
 			return 1
 		}
 
+		var staticSecretRetryDuration time.Duration
+		if config.Cache.StaticSecretRetryDurationInMinutes != nil {
+			staticSecretRetryDuration = time.Duration(float64(*config.Cache.StaticSecretRetryDurationInMinutes)*60) * time.Second
+		}
+
+		var staticSecretMaxRetryCount int
+		if config.Cache.StaticSecretMaxRetryCount != nil {
+			staticSecretMaxRetryCount = int(*config.Cache.StaticSecretMaxRetryCount)
+		}
+
 		// Create the lease cache proxier and set its underlying proxier to
 		// the API proxier.
 		leaseCache, err := cache.NewLeaseCache(&cache.LeaseCacheConfig{
@@ -460,7 +470,9 @@ func (c *AgentCommand) Run(args []string) int {
 			Proxier:     apiProxy,
 			Logger:      cacheLogger.Named("leasecache"),
 			//Multiply minutes by 60 so that we can support a fraction of a minute
-			StaticSecretDuration: time.Duration(float64(config.Cache.StaticSecretDurationInMinutes)*60) * time.Second,
+			StaticSecretDuration:      time.Duration(float64(config.Cache.StaticSecretDurationInMinutes)*60) * time.Second,
+			StaticSecretRetryDuration: staticSecretRetryDuration,
+			StaticSecretMaxRetryCount: staticSecretMaxRetryCount,
 		})
 		if err != nil {
 			c.UI.Error(fmt.Sprintf("Error creating lease cache: %v", err))
@@ -481,6 +493,7 @@ func (c *AgentCommand) Run(args []string) int {
 				Logger: cacheLogger,
 				Sink:   inmemSink,
 			})
+			leaseCache.Sink = inmemSink
 		}
 
 		var proxyVaultToken = !config.Cache.ForceAutoAuthToken

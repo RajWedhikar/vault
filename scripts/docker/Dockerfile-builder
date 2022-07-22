@@ -1,4 +1,4 @@
-ARG VERSION=1.15-alpine
+ARG VERSION=1.15-alpine3.12
 
 FROM golang:${VERSION}
 
@@ -6,7 +6,8 @@ ARG CGO_ENABLED=0
 ARG BUILD_TAGS
 ARG XC_OSARCH="linux/amd64 darwin/amd64"
 
-RUN apk add --update nodejs-npm yarn zip make git bash
+RUN apk add --update nodejs npm yarn zip make git bash
+
 
 WORKDIR /go/src/vault
 COPY . .

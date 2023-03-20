@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package ssh
 
 import (
@@ -13,7 +16,7 @@ func pathLookup(b *backend) *framework.Path {
 	return &framework.Path{
 		Pattern: "lookup",
 		Fields: map[string]*framework.FieldSchema{
-			"ip": &framework.FieldSchema{
+			"ip": {
 				Type:        framework.TypeString,
 				Description: "[Required] IP address of remote host",
 			},

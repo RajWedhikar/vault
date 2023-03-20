@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package misc
 
 import (
@@ -40,7 +43,7 @@ func TestRecovery(t *testing.T) {
 
 		client := cluster.Cores[0].Client
 		rootToken = client.Token()
-		var fooVal = map[string]interface{}{"bar": 1.0}
+		fooVal := map[string]interface{}{"bar": 1.0}
 		_, err = client.Logical().Write("secret/foo", fooVal)
 		if err != nil {
 			t.Fatal(err)

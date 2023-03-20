@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package policy
 
 import (
@@ -147,7 +150,7 @@ path "secret/{{ identity.groups.names.foobar.name}}/*" {
 	}
 	clientToken := secret.Auth.ClientToken
 
-	var tests = []struct {
+	tests := []struct {
 		name string
 		path string
 		fail bool

@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 // Package template is responsible for rendering user supplied templates to
 // disk. The Server type accepts configuration to communicate to a Vault server
 // and a Vault token for authentication. Internally, the Server creates a Consul
@@ -7,8 +10,12 @@ package template
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
+
+	"go.uber.org/atomic"
 
 	ctconfig "github.com/hashicorp/consul-template/config"
 	ctlogging "github.com/hashicorp/consul-template/logging"
@@ -23,10 +30,10 @@ import (
 type ServerConfig struct {
 	Logger hclog.Logger
 	// Client        *api.Client
-	VaultConf     *config.Vault
-	ExitAfterAuth bool
+	AgentConfig *config.Config
 
-	Namespace string
+	ExitAfterAuth bool
+	Namespace     string
 
 	// LogLevel is needed to set the internal Consul Template Runner's log level
 	// to match the log level of Vault Agent. The internal Runner creates it's own
@@ -45,17 +52,20 @@ type Server struct {
 	config *ServerConfig
 
 	// runner is the consul-template runner
-	runner *manager.Runner
+	runner        *manager.Runner
+	runnerStarted *atomic.Bool
 
 	// Templates holds the parsed Consul Templates
 	Templates []*ctconfig.TemplateConfig
 
-	// lookupMap is alist of templates indexed by their consul-template ID. This
+	// lookupMap is a list of templates indexed by their consul-template ID. This
 	// is used to ensure all Vault templates have been rendered before returning
 	// from the runner in the event we're using exit after auth.
 	lookupMap map[string][]*ctconfig.TemplateConfig
 
-	DoneCh        chan struct{}
+	DoneCh  chan struct{}
+	stopped *atomic.Bool
+
 	logger        hclog.Logger
 	exitAfterAuth bool
 }
@@ -64,6 +74,9 @@ type Server struct {
 func NewServer(conf *ServerConfig) *Server {
 	ts := Server{
 		DoneCh:        make(chan struct{}),
+		stopped:       atomic.NewBool(false),
+		runnerStarted: atomic.NewBool(false),
+
 		logger:        conf.Logger,
 		config:        conf,
 		exitAfterAuth: conf.ExitAfterAuth,
@@ -74,39 +87,38 @@ func NewServer(conf *ServerConfig) *Server {
 // Run kicks off the internal Consul Template runner, and listens for changes to
 // the token from the AuthHandler. If Done() is called on the context, shut down
 // the Runner and return
-func (ts *Server) Run(ctx context.Context, incoming chan string, templates []*ctconfig.TemplateConfig) {
-	latestToken := new(string)
-	ts.logger.Info("starting template server")
-	// defer the closing of the DoneCh
-	defer func() {
-		ts.logger.Info("template server stopped")
-		close(ts.DoneCh)
-	}()
-
+func (ts *Server) Run(ctx context.Context, incoming chan string, templates []*ctconfig.TemplateConfig) error {
 	if incoming == nil {
-		panic("incoming channel is nil")
+		return errors.New("template server: incoming channel is nil")
 	}
 
-	// If there are no templates, return
+	latestToken := new(string)
+	ts.logger.Info("starting template server")
+
+	defer func() {
+		ts.logger.Info("template server stopped")
+	}()
+
+	// If there are no templates, we wait for context cancellation and then return
 	if len(templates) == 0 {
 		ts.logger.Info("no templates found")
-		return
+		<-ctx.Done()
+		return nil
 	}
 
 	// construct a consul template vault config based the agents vault
 	// configuration
 	var runnerConfig *ctconfig.Config
 	var runnerConfigErr error
+
 	if runnerConfig, runnerConfigErr = newRunnerConfig(ts.config, templates); runnerConfigErr != nil {
-		ts.logger.Error("template server failed to generate runner config", "error", runnerConfigErr)
-		return
+		return fmt.Errorf("template server failed to runner generate config: %w", runnerConfigErr)
 	}
 
 	var err error
 	ts.runner, err = manager.NewRunner(runnerConfig, false)
 	if err != nil {
-		ts.logger.Error("template server failed to create", "error", err)
-		return
+		return fmt.Errorf("template server failed to create: %w", err)
 	}
 
 	// Build the lookup map using the id mapping from the Template runner. This is
@@ -130,11 +142,20 @@ func (ts *Server) Run(ctx context.Context, incoming chan string, templates []*ct
 		select {
 		case <-ctx.Done():
 			ts.runner.Stop()
-			return
+			return nil
 
 		case token := <-incoming:
 			if token != *latestToken {
 				ts.logger.Info("template server received new token")
+
+				// If the runner was previously started and we intend to exit
+				// after auth, do not restart the runner if a new token is
+				// received.
+				if ts.exitAfterAuth && ts.runnerStarted.Load() {
+					ts.logger.Info("template server not restarting with new token with exit_after_auth set to true")
+					continue
+				}
+
 				ts.runner.Stop()
 				*latestToken = token
 				ctv := ctconfig.Config{
@@ -142,6 +163,7 @@ func (ts *Server) Run(ctx context.Context, incoming chan string, templates []*ct
 						Token: latestToken,
 					},
 				}
+
 				runnerConfig = runnerConfig.Merge(&ctv)
 				var runnerErr error
 				ts.runner, runnerErr = manager.NewRunner(runnerConfig, false)
@@ -149,17 +171,26 @@ func (ts *Server) Run(ctx context.Context, incoming chan string, templates []*ct
 					ts.logger.Error("template server failed with new Vault token", "error", runnerErr)
 					continue
 				}
+				ts.runnerStarted.CAS(false, true)
 				go ts.runner.Start()
 			}
+
 		case err := <-ts.runner.ErrCh:
 			ts.logger.Error("template server error", "error", err.Error())
 			ts.runner.StopImmediately()
+
+			// Return after stopping the runner if exit on retry failure was
+			// specified
+			if ts.config.AgentConfig.TemplateConfig != nil && ts.config.AgentConfig.TemplateConfig.ExitOnRetryFailure {
+				return fmt.Errorf("template server: %w", err)
+			}
+
 			ts.runner, err = manager.NewRunner(runnerConfig, false)
 			if err != nil {
-				ts.logger.Error("template server failed to create", "error", err)
-				return
+				return fmt.Errorf("template server failed to create: %w", err)
 			}
 			go ts.runner.Start()
+
 		case <-ts.runner.TemplateRenderedCh():
 			// A template has been rendered, figure out what to do
 			events := ts.runner.RenderEvents()
@@ -185,9 +216,15 @@ func (ts *Server) Run(ctx context.Context, incoming chan string, templates []*ct
 				// return. The deferred closing of the DoneCh will allow agent to
 				// continue with closing down
 				ts.runner.Stop()
-				return
+				return nil
 			}
 		}
+	}
+}
+
+func (ts *Server) Stop() {
+	if ts.stopped.CAS(false, true) {
+		close(ts.DoneCh)
 	}
 }
 
@@ -201,10 +238,23 @@ func newRunnerConfig(sc *ServerConfig, templates ctconfig.TemplateConfigs) (*ctc
 	// Always set these to ensure nothing is picked up from the environment
 	conf.Vault.RenewToken = pointerutil.BoolPtr(false)
 	conf.Vault.Token = pointerutil.StringPtr("")
-	conf.Vault.Address = &sc.VaultConf.Address
+	conf.Vault.Address = &sc.AgentConfig.Vault.Address
 
 	if sc.Namespace != "" {
 		conf.Vault.Namespace = &sc.Namespace
+	}
+
+	if sc.AgentConfig.TemplateConfig != nil && sc.AgentConfig.TemplateConfig.StaticSecretRenderInt != 0 {
+		conf.Vault.DefaultLeaseDuration = &sc.AgentConfig.TemplateConfig.StaticSecretRenderInt
+	}
+
+	if sc.AgentConfig.DisableIdleConnsTemplating {
+		idleConns := -1
+		conf.Vault.Transport.MaxIdleConns = &idleConns
+	}
+
+	if sc.AgentConfig.DisableKeepAlivesTemplating {
+		conf.Vault.Transport.DisableKeepAlives = pointerutil.BoolPtr(true)
 	}
 
 	conf.Vault.SSL = &ctconfig.SSLConfig{
@@ -217,16 +267,55 @@ func newRunnerConfig(sc *ServerConfig, templates ctconfig.TemplateConfigs) (*ctc
 		ServerName: pointerutil.StringPtr(""),
 	}
 
-	if strings.HasPrefix(sc.VaultConf.Address, "https") || sc.VaultConf.CACert != "" {
-		skipVerify := sc.VaultConf.TLSSkipVerify
+	// If Vault.Retry isn't specified, use the default of 12 retries.
+	// This retry value will be respected regardless of if we use the cache.
+	attempts := ctconfig.DefaultRetryAttempts
+	if sc.AgentConfig.Vault != nil && sc.AgentConfig.Vault.Retry != nil {
+		attempts = sc.AgentConfig.Vault.Retry.NumRetries
+	}
+
+	// Use the cache if available or fallback to the Vault server values.
+	if sc.AgentConfig.Cache != nil {
+		if sc.AgentConfig.Cache.InProcDialer == nil {
+			return nil, fmt.Errorf("missing in-process dialer configuration")
+		}
+		if conf.Vault.Transport == nil {
+			conf.Vault.Transport = &ctconfig.TransportConfig{}
+		}
+		conf.Vault.Transport.CustomDialer = sc.AgentConfig.Cache.InProcDialer
+		// The in-process dialer ignores the address passed in, but we're still
+		// setting it here to override the setting at the top of this function,
+		// and to prevent the vault/http client from defaulting to https.
+		conf.Vault.Address = pointerutil.StringPtr("http://127.0.0.1:8200")
+	} else if strings.HasPrefix(sc.AgentConfig.Vault.Address, "https") || sc.AgentConfig.Vault.CACert != "" {
+		skipVerify := sc.AgentConfig.Vault.TLSSkipVerify
 		verify := !skipVerify
 		conf.Vault.SSL = &ctconfig.SSLConfig{
-			Enabled: pointerutil.BoolPtr(true),
-			Verify:  &verify,
-			Cert:    &sc.VaultConf.ClientCert,
-			Key:     &sc.VaultConf.ClientKey,
-			CaCert:  &sc.VaultConf.CACert,
-			CaPath:  &sc.VaultConf.CAPath,
+			Enabled:    pointerutil.BoolPtr(true),
+			Verify:     &verify,
+			Cert:       &sc.AgentConfig.Vault.ClientCert,
+			Key:        &sc.AgentConfig.Vault.ClientKey,
+			CaCert:     &sc.AgentConfig.Vault.CACert,
+			CaPath:     &sc.AgentConfig.Vault.CAPath,
+			ServerName: &sc.AgentConfig.Vault.TLSServerName,
+		}
+	}
+	enabled := attempts > 0
+	conf.Vault.Retry = &ctconfig.RetryConfig{
+		Attempts: &attempts,
+		Enabled:  &enabled,
+	}
+
+	// Sync Consul Template's retry with user set auto-auth initial backoff value.
+	// This is helpful if Auto Auth cannot get a new token and CT is trying to fetch
+	// secrets.
+	if sc.AgentConfig.AutoAuth != nil && sc.AgentConfig.AutoAuth.Method != nil {
+		if sc.AgentConfig.AutoAuth.Method.MinBackoff > 0 {
+			conf.Vault.Retry.Backoff = &sc.AgentConfig.AutoAuth.Method.MinBackoff
+		}
+
+		if sc.AgentConfig.AutoAuth.Method.MaxBackoff > 0 {
+			conf.Vault.Retry.MaxBackoff = &sc.AgentConfig.AutoAuth.Method.MaxBackoff
 		}
 	}
 
@@ -260,7 +349,7 @@ func logLevelToStringPtr(level hclog.Level) *string {
 	case hclog.Warn:
 		levelStr = "WARN"
 	case hclog.Error:
-		levelStr = "ERROR"
+		levelStr = "ERR"
 	default:
 		levelStr = "INFO"
 	}

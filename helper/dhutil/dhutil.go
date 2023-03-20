@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package dhutil
 
 import (
@@ -6,11 +9,11 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/hkdf"
 	"io"
+
+	"golang.org/x/crypto/hkdf"
 
 	"golang.org/x/crypto/curve25519"
 )
@@ -55,15 +58,15 @@ func GenerateSharedSecret(ourPrivate, theirPublic []byte) ([]byte, error) {
 func DeriveSharedKey(secret, ourPublic, theirPublic []byte) ([]byte, error) {
 	// Derive the final key from the HKDF of the secret and public keys.
 
-/*
-	Internally, HKDF hashes the secret and two public keys. If Alice and Bob are doing DH key exchange, Alice calculates:
+	/*
+		Internally, HKDF hashes the secret and two public keys. If Alice and Bob are doing DH key exchange, Alice calculates:
 
-	HKDF(secret, A, B) since ourPublic is A.
+		HKDF(secret, A, B) since ourPublic is A.
 
-		Bob calculates HKDF(secret, B, A), since Bob's ours is B. That produces a different value. Now we only care
-	    that both public keys participate in the derivation, so simply sorting them so they are in a consistent
-	    numerical order (either one would do) arrives at an agreed value.
-*/
+			Bob calculates HKDF(secret, B, A), since Bob's ours is B. That produces a different value. Now we only care
+		    that both public keys participate in the derivation, so simply sorting them so they are in a consistent
+		    numerical order (either one would do) arrives at an agreed value.
+	*/
 
 	var pub1 []byte
 	var pub2 []byte
@@ -89,7 +92,6 @@ func DeriveSharedKey(secret, ourPublic, theirPublic []byte) ([]byte, error) {
 	if n != 32 {
 		return nil, errors.New("short read from hkdf")
 	}
-	fmt.Printf("Key: %s\n", hex.EncodeToString(key[:]))
 
 	return key[:], nil
 }

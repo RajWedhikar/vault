@@ -1,3 +1,9 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+import { or, not } from '@ember/object/computed';
 import { inject as service } from '@ember/service';
 import Component from '@ember/component';
 import { computed } from '@ember/object';
@@ -15,13 +21,13 @@ export default Component.extend({
   },
 
   maybeHideFeatures() {
-    let features = this.get('allFeatures');
-    features.forEach(feat => {
+    const features = this.allFeatures;
+    features.forEach((feat) => {
       feat.disabled = this.doesNotHavePermission(feat.requiredPermissions);
     });
 
-    if (this.get('showReplication') === false) {
-      let feature = this.get('allFeatures').findBy('key', 'replication');
+    if (this.showReplication === false) {
+      const feature = this.allFeatures.findBy('key', 'replication');
       feature.show = false;
     }
   },
@@ -33,22 +39,22 @@ export default Component.extend({
     //   'example/path': ['capability'],
     //   'second/example/path': ['update', 'sudo'],
     // }
-    return !Object.keys(requiredPermissions).every(path => {
+    return !Object.keys(requiredPermissions).every((path) => {
       return this.permissions.hasPermission(path, requiredPermissions[path]);
     });
   },
 
-  estimatedTime: computed('selectedFeatures', function() {
+  estimatedTime: computed('selectedFeatures', function () {
     let time = 0;
-    for (let feature of Object.keys(FEATURE_MACHINE_TIME)) {
+    for (const feature of Object.keys(FEATURE_MACHINE_TIME)) {
       if (this.selectedFeatures.includes(feature)) {
         time += FEATURE_MACHINE_TIME[feature];
       }
     }
     return time;
   }),
-  selectProgress: computed('selectedFeatures', function() {
-    let bar = this.selectedFeatures.map(feature => {
+  selectProgress: computed('selectedFeatures', function () {
+    let bar = this.selectedFeatures.map((feature) => {
       return { style: htmlSafe('width:0%;'), completed: false, showIcon: true, feature: feature };
     });
     if (bar.length === 0) {
@@ -56,7 +62,7 @@ export default Component.extend({
     }
     return bar;
   }),
-  allFeatures: computed(function() {
+  allFeatures: computed(function () {
     return [
       {
         key: 'secrets',
@@ -126,24 +132,18 @@ export default Component.extend({
     ];
   }),
 
-  showReplication: computed('version.{hasPerfReplication,hasDRReplication}', function() {
-    return this.get('version.hasPerfReplication') || this.get('version.hasDRReplication');
+  showReplication: or('version.hasPerfReplication', 'version.hasDRReplication'),
+
+  selectedFeatures: computed('allFeatures.@each.selected', function () {
+    return this.allFeatures.filterBy('selected').mapBy('key');
   }),
 
-  selectedFeatures: computed('allFeatures.@each.selected', function() {
-    return this.get('allFeatures')
-      .filterBy('selected')
-      .mapBy('key');
-  }),
-
-  cannotStartWizard: computed('selectedFeatures', function() {
-    return !this.get('selectedFeatures').length;
-  }),
+  cannotStartWizard: not('selectedFeatures.length'),
 
   actions: {
     saveFeatures() {
-      let wizard = this.get('wizard');
-      wizard.saveFeatures(this.get('selectedFeatures'));
+      const wizard = this.wizard;
+      wizard.saveFeatures(this.selectedFeatures);
       wizard.transitionTutorialMachine('active.select', 'CONTINUE');
     },
   },

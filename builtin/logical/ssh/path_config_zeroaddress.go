@@ -1,10 +1,13 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package ssh
 
 import (
 	"context"
 	"fmt"
 
-	"github.com/hashicorp/vault/sdk/helper/strutil"
+	"github.com/hashicorp/go-secure-stdlib/strutil"
 
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
@@ -19,7 +22,7 @@ func pathConfigZeroAddress(b *backend) *framework.Path {
 	return &framework.Path{
 		Pattern: "config/zeroaddress",
 		Fields: map[string]*framework.FieldSchema{
-			"roles": &framework.FieldSchema{
+			"roles": {
 				Type: framework.TypeCommaStringSlice,
 				Description: `[Required] Comma separated list of role names which
 				allows credentials to be requested for any IP address. CIDR blocks

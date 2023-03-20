@@ -1,10 +1,14 @@
-import DS from 'ember-data';
-const { attr } = DS;
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+import { attr } from '@ember-data/model';
 import { assign } from '@ember/polyfills';
 import { camelize, capitalize } from '@ember/string';
 
-export const expandOpenApiProps = function(props) {
-  let attrs = {};
+export const expandOpenApiProps = function (props) {
+  const attrs = {};
   // expand all attributes
   for (const propName in props) {
     const prop = props[propName];
@@ -26,15 +30,21 @@ export const expandOpenApiProps = function(props) {
       editType = items.type + capitalize(type);
     }
 
-    let attrDefn = {
+    const attrDefn = {
       editType,
       helpText: description,
       possibleValues: prop['enum'],
-      fieldValue: isId ? 'id' : null,
+      fieldValue: isId ? 'mutableId' : null,
       fieldGroup: group || 'default',
       readOnly: isId,
       defaultValue: value || null,
     };
+
+    if (type === 'object' && !!value) {
+      attrDefn.defaultValue = () => {
+        return value;
+      };
+    }
 
     if (sensitive) {
       attrDefn.sensitive = true;
@@ -53,7 +63,7 @@ export const expandOpenApiProps = function(props) {
     }
 
     // loop to remove empty vals
-    for (let attrProp in attrDefn) {
+    for (const attrProp in attrDefn) {
       if (attrDefn[attrProp] == null) {
         delete attrDefn[attrProp];
       }
@@ -63,11 +73,11 @@ export const expandOpenApiProps = function(props) {
   return attrs;
 };
 
-export const combineAttributes = function(oldAttrs, newProps) {
-  let newAttrs = {};
-  let newFields = [];
+export const combineAttributes = function (oldAttrs, newProps) {
+  const newAttrs = {};
+  const newFields = [];
   if (oldAttrs) {
-    oldAttrs.forEach(function(value, name) {
+    oldAttrs.forEach(function (value, name) {
       if (newProps[name]) {
         newAttrs[name] = attr(newProps[name].type, assign({}, newProps[name], value.options));
       } else {
@@ -75,7 +85,7 @@ export const combineAttributes = function(oldAttrs, newProps) {
       }
     });
   }
-  for (let prop in newProps) {
+  for (const prop in newProps) {
     if (newAttrs[prop]) {
       continue;
     } else {
@@ -86,8 +96,8 @@ export const combineAttributes = function(oldAttrs, newProps) {
   return { attrs: newAttrs, newFields };
 };
 
-export const combineFields = function(currentFields, newFields, excludedFields) {
-  let otherFields = newFields.filter(field => {
+export const combineFields = function (currentFields, newFields, excludedFields) {
+  const otherFields = newFields.filter((field) => {
     return !currentFields.includes(field) && !excludedFields.includes(field);
   });
   if (otherFields.length) {
@@ -96,13 +106,13 @@ export const combineFields = function(currentFields, newFields, excludedFields) 
   return currentFields;
 };
 
-export const combineFieldGroups = function(currentGroups, newFields, excludedFields) {
+export const combineFieldGroups = function (currentGroups, newFields, excludedFields) {
   let allFields = [];
-  for (let group of currentGroups) {
-    let fieldName = Object.keys(group)[0];
+  for (const group of currentGroups) {
+    const fieldName = Object.keys(group)[0];
     allFields = allFields.concat(group[fieldName]);
   }
-  let otherFields = newFields.filter(field => {
+  const otherFields = newFields.filter((field) => {
     return !allFields.includes(field) && !excludedFields.includes(field);
   });
   if (otherFields.length) {

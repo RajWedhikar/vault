@@ -1,3 +1,8 @@
-import TransformBase from './transform-edit-base';
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
 
-export default TransformBase.extend({});
+import TransformationEdit from './transformation-edit';
+
+export default TransformationEdit.extend({});

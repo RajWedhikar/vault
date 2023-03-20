@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package vault
 
 import (
@@ -188,7 +191,7 @@ func (i *IdentityStore) handleGroupAliasUpdateCommon(ctx context.Context, req *l
 
 	// Validate name/accessor whether new or update
 	{
-		mountEntry := i.core.router.MatchingMountByAccessor(mountAccessor)
+		mountEntry := i.router.MatchingMountByAccessor(mountAccessor)
 		if mountEntry == nil {
 			return logical.ErrorResponse(fmt.Sprintf("invalid mount accessor %q", mountAccessor)), nil
 		}

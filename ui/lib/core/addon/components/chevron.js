@@ -1,4 +1,9 @@
 /**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+/**
  * @module Chevron
  * `Chevron` components render `Icon` with one of the `chevron-` glyphs.
  *
@@ -25,8 +30,8 @@ export default Component.extend({
   layout,
   direction: 'right',
   isButton: false,
-  glyph: computed('direction', function() {
-    let { direction } = this;
+  glyph: computed('direction', function () {
+    const { direction } = this;
     assert(
       `The direction property of ${this.toString()} must be one of the following: ${DIRECTIONS.join(', ')}`,
       DIRECTIONS.includes(direction)

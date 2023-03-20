@@ -1,4 +1,9 @@
 /**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+/**
  * @module ShamirModalFlow
  * ShamirModalFlow is an extension of the ShamirFlow component that does the Generate Action Token workflow inside of a Modal.
  * Please note, this is not an extensive list of the required parameters -- please see ShamirFlow for others
@@ -26,7 +31,7 @@ export default ShamirFlow.extend({
           this.send('reset');
         }
       } else {
-        const adapter = this.get('store').adapterFor('cluster');
+        const adapter = this.store.adapterFor('cluster');
         adapter.generateDrOperationToken(this.model, { cancel: true });
         this.send('reset');
       }

@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package totp
 
 import (
@@ -5,7 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hashicorp/errwrap"
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
 	otplib "github.com/pquerna/otp"
@@ -16,11 +18,11 @@ func pathCode(b *backend) *framework.Path {
 	return &framework.Path{
 		Pattern: "code/" + framework.GenericNameWithAtRegex("name"),
 		Fields: map[string]*framework.FieldSchema{
-			"name": &framework.FieldSchema{
+			"name": {
 				Type:        framework.TypeString,
 				Description: "Name of the key.",
 			},
-			"code": &framework.FieldSchema{
+			"code": {
 				Type:        framework.TypeString,
 				Description: "TOTP code to be validated.",
 			},
@@ -108,7 +110,7 @@ func (b *backend) pathValidateCode(ctx context.Context, req *logical.Request, da
 			int64(key.Period)*
 			int64((2+key.Skew))))
 	if err != nil {
-		return nil, errwrap.Wrapf("error adding code to used cache: {{err}}", err)
+		return nil, fmt.Errorf("error adding code to used cache: %w", err)
 	}
 
 	return &logical.Response{
@@ -121,6 +123,7 @@ func (b *backend) pathValidateCode(ctx context.Context, req *logical.Request, da
 const pathCodeHelpSyn = `
 Request time-based one-time use password or validate a password for a certain key .
 `
+
 const pathCodeHelpDesc = `
 This path generates and validates time-based one-time use passwords for a certain key. 
 

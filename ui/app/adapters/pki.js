@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 import { assert } from '@ember/debug';
 import ApplicationAdapter from './application';
 
@@ -13,7 +18,7 @@ export default ApplicationAdapter.extend({
     const data = serializer.serialize(snapshot, requestType);
     const role = snapshot.attr('role');
 
-    return this.ajax(this.url(role, snapshot), 'POST', { data }).then(response => {
+    return this.ajax(this.url(role, snapshot), 'POST', { data }).then((response) => {
       response.id = snapshot.id;
       response.modelName = type.modelName;
       store.pushPayload(type.modelName, response);

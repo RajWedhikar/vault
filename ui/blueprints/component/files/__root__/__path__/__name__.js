@@ -1,4 +1,12 @@
 /**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+import Component from '@glimmer/component';
+<%= importTemplate %>
+<%= setComponentTemplate %>
+/**
  * @module <%= classifiedModuleName %>
  * <%= classifiedModuleName %> components are used to...
  *
@@ -11,7 +19,7 @@
  * @param {string} [param1=defaultValue] - param1 is...
  */
 
-import Component from '@ember/component';
-<%= importTemplate %>
-export default Component.extend({<%= contents %>
-});
+<%= exportDefault %>class <%= classifiedModuleName %> extends Component { 
+}
+
+<%= exportAddOn %>

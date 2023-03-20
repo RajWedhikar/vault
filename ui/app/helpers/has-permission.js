@@ -1,22 +1,27 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+/* eslint-disable ember/no-observers */
 import Helper from '@ember/component/helper';
 import { inject as service } from '@ember/service';
 import { observer } from '@ember/object';
 
 export default Helper.extend({
   permissions: service(),
-  /* eslint-disable-next-line ember/no-observers */
   onPermissionsChange: observer(
     'permissions.exactPaths',
     'permissions.globPaths',
     'permissions.canViewAll',
-    function() {
+    function () {
       this.recompute();
     }
   ),
 
   compute([route], params) {
-    let { routeParams } = params;
-    let permissions = this.permissions;
+    const { routeParams } = params;
+    const permissions = this.permissions;
 
     return permissions.hasNavPermission(route, routeParams);
   },

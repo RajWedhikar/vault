@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package transit
 
 import (
@@ -5,7 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/hashicorp/errwrap"
+	"github.com/hashicorp/vault/helper/constants"
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/helper/errutil"
 	"github.com/hashicorp/vault/sdk/helper/keysutil"
@@ -17,31 +20,39 @@ func (b *backend) pathRewrap() *framework.Path {
 	return &framework.Path{
 		Pattern: "rewrap/" + framework.GenericNameRegex("name"),
 		Fields: map[string]*framework.FieldSchema{
-			"name": &framework.FieldSchema{
+			"name": {
 				Type:        framework.TypeString,
 				Description: "Name of the key",
 			},
 
-			"ciphertext": &framework.FieldSchema{
+			"ciphertext": {
 				Type:        framework.TypeString,
 				Description: "Ciphertext value to rewrap",
 			},
 
-			"context": &framework.FieldSchema{
+			"context": {
 				Type:        framework.TypeString,
 				Description: "Base64 encoded context for key derivation. Required for derived keys.",
 			},
 
-			"nonce": &framework.FieldSchema{
+			"nonce": {
 				Type:        framework.TypeString,
 				Description: "Nonce for when convergent encryption is used",
 			},
 
-			"key_version": &framework.FieldSchema{
+			"key_version": {
 				Type: framework.TypeInt,
 				Description: `The version of the key to use for encryption.
 Must be 0 (for latest) or a value greater than or equal
 to the min_encryption_version configured on the key.`,
+			},
+
+			"batch_input": {
+				Type: framework.TypeSlice,
+				Description: `
+Specifies a list of items to be re-encrypted in a single batch. When this parameter is set,
+if the parameters 'ciphertext', 'context' and 'nonce' are also set, they will be ignored.
+Any batch output will preserve the order of the batch input.`,
 			},
 		},
 
@@ -61,7 +72,7 @@ func (b *backend) pathRewrapWrite(ctx context.Context, req *logical.Request, d *
 	if batchInputRaw != nil {
 		err = mapstructure.Decode(batchInputRaw, &batchInputItems)
 		if err != nil {
-			return nil, errwrap.Wrapf("failed to parse batch input: {{err}}", err)
+			return nil, fmt.Errorf("failed to parse batch input: %w", err)
 		}
 
 		if len(batchInputItems) == 0 {
@@ -82,7 +93,7 @@ func (b *backend) pathRewrapWrite(ctx context.Context, req *logical.Request, d *
 		}
 	}
 
-	batchResponseItems := make([]BatchResponseItem, len(batchInputItems))
+	batchResponseItems := make([]EncryptBatchResponseItem, len(batchInputItems))
 	contextSet := len(batchInputItems[0].Context) != 0
 
 	for i, item := range batchInputItems {
@@ -115,7 +126,7 @@ func (b *backend) pathRewrapWrite(ctx context.Context, req *logical.Request, d *
 	}
 
 	// Get the policy
-	p, _, err := b.lm.GetPolicy(ctx, keysutil.PolicyRequest{
+	p, _, err := b.GetPolicy(ctx, keysutil.PolicyRequest{
 		Storage: req.Storage,
 		Name:    d.Get("name").(string),
 	}, b.GetRandomReader())
@@ -129,6 +140,7 @@ func (b *backend) pathRewrapWrite(ctx context.Context, req *logical.Request, d *
 		p.Lock(false)
 	}
 
+	warnAboutNonceUsage := false
 	for i, item := range batchInputItems {
 		if batchResponseItems[i].Error != "" {
 			continue
@@ -144,6 +156,10 @@ func (b *backend) pathRewrapWrite(ctx context.Context, req *logical.Request, d *
 				p.Unlock()
 				return nil, err
 			}
+		}
+
+		if !warnAboutNonceUsage && shouldWarnAboutNonceUsage(p, item.DecodedNonce) {
+			warnAboutNonceUsage = true
 		}
 
 		ciphertext, err := p.Encrypt(item.KeyVersion, item.DecodedContext, item.DecodedNonce, plaintext)
@@ -177,6 +193,10 @@ func (b *backend) pathRewrapWrite(ctx context.Context, req *logical.Request, d *
 
 	resp := &logical.Response{}
 	if batchInputRaw != nil {
+		// Copy the references
+		for i := range batchInputItems {
+			batchResponseItems[i].Reference = batchInputItems[i].Reference
+		}
 		resp.Data = map[string]interface{}{
 			"batch_results": batchResponseItems,
 		}
@@ -189,6 +209,10 @@ func (b *backend) pathRewrapWrite(ctx context.Context, req *logical.Request, d *
 			"ciphertext":  batchResponseItems[0].Ciphertext,
 			"key_version": batchResponseItems[0].KeyVersion,
 		}
+	}
+
+	if constants.IsFIPS() && warnAboutNonceUsage {
+		resp.AddWarning("A provided nonce value was used within FIPS mode, this violates FIPS 140 compliance.")
 	}
 
 	p.Unlock()

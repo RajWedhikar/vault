@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package awsauth
 
 import (
@@ -14,7 +17,6 @@ import (
 )
 
 func TestBackend_E2E_Initialize(t *testing.T) {
-
 	ctx := context.Background()
 
 	// Set up the cluster.  This will trigger an Initialize(); we sleep briefly
@@ -62,7 +64,8 @@ func TestBackend_E2E_Initialize(t *testing.T) {
 	data := map[string]interface{}{
 		"auth_type":       "ec2",
 		"policies":        "default",
-		"bound_subnet_id": "subnet-abcdef"}
+		"bound_subnet_id": "subnet-abcdef",
+	}
 	if _, err := core.Client.Logical().Write("auth/aws/role/test-role", data); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +103,6 @@ func TestBackend_E2E_Initialize(t *testing.T) {
 }
 
 func setupAwsTestCluster(t *testing.T, _ context.Context) *vault.TestCluster {
-
 	// create a cluster with the aws auth backend built-in
 	logger := logging.NewVaultLogger(hclog.Trace)
 	coreConfig := &vault.CoreConfig{

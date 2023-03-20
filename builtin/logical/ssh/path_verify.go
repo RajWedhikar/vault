@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package ssh
 
 import (
@@ -12,7 +15,7 @@ func pathVerify(b *backend) *framework.Path {
 	return &framework.Path{
 		Pattern: "verify",
 		Fields: map[string]*framework.FieldSchema{
-			"otp": &framework.FieldSchema{
+			"otp": {
 				Type:        framework.TypeString,
 				Description: "[Required] One-Time-Key that needs to be validated",
 			},

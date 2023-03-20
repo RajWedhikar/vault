@@ -1,9 +1,13 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+import { attr } from '@ember-data/model';
 import { expandOpenApiProps, combineAttributes, combineFieldGroups } from 'vault/utils/openapi-to-attrs';
 import { module, test } from 'qunit';
-import DS from 'ember-data';
-const { attr } = DS;
 
-module('Unit | Util | OpenAPI Data Utilities', function() {
+module('Unit | Util | OpenAPI Data Utilities', function () {
   const OPENAPI_RESPONSE_PROPS = {
     ttl: {
       type: 'string',
@@ -141,22 +145,25 @@ module('Unit | Util | OpenAPI Data Utilities', function() {
 
   const NEW_FIELDS = ['one', 'two', 'three'];
 
-  test('it creates objects from OpenAPI schema props', function(assert) {
+  test('it creates objects from OpenAPI schema props', function (assert) {
+    assert.expect(6);
     const generatedProps = expandOpenApiProps(OPENAPI_RESPONSE_PROPS);
-    for (let propName in EXPANDED_PROPS) {
+    for (const propName in EXPANDED_PROPS) {
       assert.deepEqual(EXPANDED_PROPS[propName], generatedProps[propName], `correctly expands ${propName}`);
     }
   });
 
-  test('it combines OpenAPI props with existing model attrs', function(assert) {
+  test('it combines OpenAPI props with existing model attrs', function (assert) {
+    assert.expect(3);
     const combined = combineAttributes(EXISTING_MODEL_ATTRS, EXPANDED_PROPS);
-    for (let propName in EXISTING_MODEL_ATTRS) {
+    for (const propName in EXISTING_MODEL_ATTRS) {
       assert.deepEqual(COMBINED_ATTRS[propName], combined[propName]);
     }
   });
 
-  test('it adds new fields from OpenAPI to fieldGroups except for exclusions', function(assert) {
-    let modelFieldGroups = [
+  test('it adds new fields from OpenAPI to fieldGroups except for exclusions', function (assert) {
+    assert.expect(3);
+    const modelFieldGroups = [
       { default: ['name', 'awesomePeople'] },
       {
         Options: ['ttl'],
@@ -170,7 +177,7 @@ module('Unit | Util | OpenAPI Data Utilities', function() {
       },
     ];
     const newFieldGroups = combineFieldGroups(modelFieldGroups, NEW_FIELDS, excludedFields);
-    for (let groupName in modelFieldGroups) {
+    for (const groupName in modelFieldGroups) {
       assert.deepEqual(
         newFieldGroups[groupName],
         expectedGroups[groupName],
@@ -178,8 +185,9 @@ module('Unit | Util | OpenAPI Data Utilities', function() {
       );
     }
   });
-  test('it adds all new fields from OpenAPI to fieldGroups when excludedFields is empty', function(assert) {
-    let modelFieldGroups = [
+  test('it adds all new fields from OpenAPI to fieldGroups when excludedFields is empty', function (assert) {
+    assert.expect(3);
+    const modelFieldGroups = [
       { default: ['name', 'awesomePeople'] },
       {
         Options: ['ttl'],
@@ -193,7 +201,7 @@ module('Unit | Util | OpenAPI Data Utilities', function() {
       },
     ];
     const nonExcludedFieldGroups = combineFieldGroups(modelFieldGroups, NEW_FIELDS, excludedFields);
-    for (let groupName in modelFieldGroups) {
+    for (const groupName in modelFieldGroups) {
       assert.deepEqual(
         nonExcludedFieldGroups[groupName],
         expectedGroups[groupName],
@@ -201,8 +209,9 @@ module('Unit | Util | OpenAPI Data Utilities', function() {
       );
     }
   });
-  test('it keeps fields the same when there are no brand new fields from OpenAPI', function(assert) {
-    let modelFieldGroups = [
+  test('it keeps fields the same when there are no brand new fields from OpenAPI', function (assert) {
+    assert.expect(3);
+    const modelFieldGroups = [
       { default: ['name', 'awesomePeople', 'two', 'one', 'three'] },
       {
         Options: ['ttl'],
@@ -216,7 +225,7 @@ module('Unit | Util | OpenAPI Data Utilities', function() {
       },
     ];
     const fieldGroups = combineFieldGroups(modelFieldGroups, NEW_FIELDS, excludedFields);
-    for (let groupName in modelFieldGroups) {
+    for (const groupName in modelFieldGroups) {
       assert.deepEqual(fieldGroups[groupName], expectedGroups[groupName], 'it incorporates all new fields');
     }
   });

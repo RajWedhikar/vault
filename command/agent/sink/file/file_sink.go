@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package file
 
 import (
@@ -7,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/hashicorp/errwrap"
 	hclog "github.com/hashicorp/go-hclog"
 	uuid "github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/vault/command/agent/sink"
@@ -30,7 +32,7 @@ func NewFileSink(conf *sink.SinkConfig) (sink.Sink, error) {
 
 	f := &fileSink{
 		logger: conf.Logger,
-		mode:   0640,
+		mode:   0o640,
 	}
 
 	pathRaw, ok := conf.Config["path"]
@@ -60,7 +62,7 @@ func NewFileSink(conf *sink.SinkConfig) (sink.Sink, error) {
 	}
 
 	if err := f.WriteToken(""); err != nil {
-		return nil, errwrap.Wrapf("error during write check: {{err}}", err)
+		return nil, fmt.Errorf("error during write check: %w", err)
 	}
 
 	f.logger.Info("file sink configured", "path", f.path, "mode", f.mode)
@@ -79,7 +81,7 @@ func (f *fileSink) WriteToken(token string) error {
 
 	u, err := uuid.GenerateUUID()
 	if err != nil {
-		return errwrap.Wrapf("error generating a uuid during write check: {{err}}", err)
+		return fmt.Errorf("error generating a uuid during write check: %w", err)
 	}
 
 	targetDir := filepath.Dir(f.path)
@@ -88,7 +90,7 @@ func (f *fileSink) WriteToken(token string) error {
 
 	tmpFile, err := os.OpenFile(filepath.Join(targetDir, fmt.Sprintf("%s.tmp.%s", fileName, tmpSuffix)), os.O_WRONLY|os.O_CREATE, f.mode)
 	if err != nil {
-		return errwrap.Wrapf(fmt.Sprintf("error opening temp file in dir %s for writing: {{err}}", targetDir), err)
+		return fmt.Errorf("error opening temp file in dir %s for writing: %w", targetDir, err)
 	}
 
 	valToWrite := token
@@ -101,12 +103,12 @@ func (f *fileSink) WriteToken(token string) error {
 		// Attempt closing and deleting but ignore any error
 		tmpFile.Close()
 		os.Remove(tmpFile.Name())
-		return errwrap.Wrapf(fmt.Sprintf("error writing to %s: {{err}}", tmpFile.Name()), err)
+		return fmt.Errorf("error writing to %s: %w", tmpFile.Name(), err)
 	}
 
 	err = tmpFile.Close()
 	if err != nil {
-		return errwrap.Wrapf(fmt.Sprintf("error closing %s: {{err}}", tmpFile.Name()), err)
+		return fmt.Errorf("error closing %s: %w", tmpFile.Name(), err)
 	}
 
 	// Now, if we were just doing a write check (blank token), remove the file
@@ -114,14 +116,14 @@ func (f *fileSink) WriteToken(token string) error {
 	if token == "" {
 		err = os.Remove(tmpFile.Name())
 		if err != nil {
-			return errwrap.Wrapf(fmt.Sprintf("error removing temp file %s during write check: {{err}}", tmpFile.Name()), err)
+			return fmt.Errorf("error removing temp file %s during write check: %w", tmpFile.Name(), err)
 		}
 		return nil
 	}
 
 	err = os.Rename(tmpFile.Name(), f.path)
 	if err != nil {
-		return errwrap.Wrapf(fmt.Sprintf("error renaming temp file %s to target file %s: {{err}}", tmpFile.Name(), f.path), err)
+		return fmt.Errorf("error renaming temp file %s to target file %s: %w", tmpFile.Name(), f.path, err)
 	}
 
 	f.logger.Info("token written", "path", f.path)

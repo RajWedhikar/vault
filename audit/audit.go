@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package audit
 
 import (
@@ -23,6 +26,12 @@ type Backend interface {
 	// MUST not be modified in anyway. They should be deep copied if this is
 	// a possibility.
 	LogResponse(context.Context, *logical.LogInput) error
+
+	// LogTestMessage is used to check an audit backend before adding it
+	// permanently. It should attempt to synchronously log the given test
+	// message, WITHOUT using the normal Salt (which would require a storage
+	// operation on creation, which is currently disallowed.)
+	LogTestMessage(context.Context, *logical.LogInput, map[string]string) error
 
 	// GetHash is used to return the given data with the backend's hash,
 	// so that a caller can determine if a value in the audit log matches

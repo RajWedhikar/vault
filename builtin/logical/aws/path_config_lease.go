@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package aws
 
 import (
@@ -13,12 +16,12 @@ func pathConfigLease(b *backend) *framework.Path {
 	return &framework.Path{
 		Pattern: "config/lease",
 		Fields: map[string]*framework.FieldSchema{
-			"lease": &framework.FieldSchema{
+			"lease": {
 				Type:        framework.TypeString,
 				Description: "Default lease for roles.",
 			},
 
-			"lease_max": &framework.FieldSchema{
+			"lease_max": {
 				Type:        framework.TypeString,
 				Description: "Maximum time a credential is valid for.",
 			},
@@ -91,7 +94,6 @@ func (b *backend) pathLeaseWrite(ctx context.Context, req *logical.Request, d *f
 
 func (b *backend) pathLeaseRead(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
 	lease, err := b.Lease(ctx, req.Storage)
-
 	if err != nil {
 		return nil, err
 	}

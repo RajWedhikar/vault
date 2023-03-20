@@ -1,3 +1,6 @@
+# Copyright (c) HashiCorp, Inc.
+# SPDX-License-Identifier: MPL-2.0
+
 disable_cache = true
 disable_mlock = true
 
@@ -39,6 +42,9 @@ entropy "seal" {
     mode = "augmentation"
 }
 
+sentinel {
+    additional_enabled_modules = []
+}
 kms "commastringpurpose" {
     purpose = "foo,bar"
 }

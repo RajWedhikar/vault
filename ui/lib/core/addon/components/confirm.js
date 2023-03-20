@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 import Component from '@ember/component';
 import { computed } from '@ember/object';
 import { htmlSafe } from '@ember/template';
@@ -28,28 +33,29 @@ export default Component.extend({
   openTrigger: null,
   height: 0,
   focusTrigger: null,
-  style: computed('height', function() {
+  style: computed('height', function () {
     return htmlSafe(`height: ${this.height}px`);
   }),
   wormholeReference: null,
-  wormholeId: computed(function() {
+  wormholeId: computed('elementId', function () {
     return `confirm-${this.elementId}`;
   }),
   didInsertElement() {
+    this._super(...arguments);
     this.set('wormholeReference', this.element.querySelector(`#${this.wormholeId}`));
   },
   didRender() {
+    this._super(...arguments);
     this.updateHeight();
   },
-  updateHeight: function() {
-    let height;
-    height = this.openTrigger
+  updateHeight: function () {
+    const height = this.openTrigger
       ? this.element.querySelector('.confirm-overlay').clientHeight
       : this.element.querySelector('.confirm').clientHeight;
     this.set('height', height);
   },
   actions: {
-    onTrigger: function(itemId, e) {
+    onTrigger: function (itemId, e) {
       this.set('openTrigger', itemId);
 
       // store a reference to the trigger so we can focus the element
@@ -57,7 +63,7 @@ export default Component.extend({
       this.set('focusTrigger', e.target);
       this.updateHeight();
     },
-    onCancel: function() {
+    onCancel: function () {
       this.set('openTrigger', '');
       this.updateHeight();
 

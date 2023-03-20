@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 /* COPIED FROM BULMA/SWITCH */
 .toggle[type='checkbox'] {
   outline: 0;
@@ -99,4 +104,8 @@
 }
 .toggle[type='checkbox'].is-success:checked + label::before {
   background: $blue;
+}
+
+.toggle-label {
+  width: 100%;
 }

@@ -1,6 +1,10 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package vault
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/hashicorp/vault/sdk/framework"
@@ -13,15 +17,15 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 			Pattern: "config/cors$",
 
 			Fields: map[string]*framework.FieldSchema{
-				"enable": &framework.FieldSchema{
+				"enable": {
 					Type:        framework.TypeBool,
 					Description: "Enables or disables CORS headers on requests.",
 				},
-				"allowed_origins": &framework.FieldSchema{
+				"allowed_origins": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: "A comma-separated string or array of strings indicating origins that may make cross-origin requests.",
 				},
-				"allowed_headers": &framework.FieldSchema{
+				"allowed_headers": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: "A comma-separated string or array of strings indicating headers that are allowed on cross-origin requests.",
 				},
@@ -32,15 +36,44 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 					Callback:    b.handleCORSRead,
 					Summary:     "Return the current CORS settings.",
 					Description: "",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"enabled": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"allowed_origins": {
+									Type:     framework.TypeCommaStringSlice,
+									Required: false,
+								},
+								"allowed_headers": {
+									Type:     framework.TypeCommaStringSlice,
+									Required: false,
+								},
+							},
+						}},
+					},
 				},
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback:    b.handleCORSUpdate,
 					Summary:     "Configure the CORS settings.",
 					Description: "",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 				logical.DeleteOperation: &framework.PathOperation{
 					Callback: b.handleCORSDelete,
 					Summary:  "Remove any CORS settings.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 			},
 
@@ -55,6 +88,35 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 					Callback:    b.handleConfigStateSanitized,
 					Summary:     "Return a sanitized version of the Vault server configuration.",
 					Description: "The sanitized output strips configuration values in the storage, HA storage, and seals stanzas, which may contain sensitive values such as API tokens. It also removes any token or secret fields in other stanzas, such as the circonus_api_token from telemetry.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							// response has dynamic keys
+							Fields: map[string]*framework.FieldSchema{},
+						}},
+					},
+				},
+			},
+		},
+
+		{
+			Pattern: "config/reload/(?P<subsystem>.+)",
+			Fields: map[string]*framework.FieldSchema{
+				"subsystem": {
+					Type:        framework.TypeString,
+					Description: strings.TrimSpace(sysHelp["config/reload"][0]),
+				},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback:    b.handleConfigReload,
+					Summary:     "Reload the given subsystem",
+					Description: "",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 			},
 		},
@@ -63,13 +125,17 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 			Pattern: "config/ui/headers/" + framework.GenericNameRegex("header"),
 
 			Fields: map[string]*framework.FieldSchema{
-				"header": &framework.FieldSchema{
+				"header": {
 					Type:        framework.TypeString,
 					Description: "The name of the header.",
 				},
-				"values": &framework.FieldSchema{
+				"values": {
 					Type:        framework.TypeStringSlice,
 					Description: "The values to set the header.",
+				},
+				"multivalue": {
+					Type:        framework.TypeBool,
+					Description: "Returns multiple values if true",
 				},
 			},
 
@@ -77,14 +143,42 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 				logical.ReadOperation: &framework.PathOperation{
 					Callback: b.handleConfigUIHeadersRead,
 					Summary:  "Return the given UI header's configuration",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"value": {
+									Type:        framework.TypeString,
+									Required:    false,
+									Description: "returns the first header value when `multivalue` request parameter is false",
+								},
+								"values": {
+									Type:        framework.TypeCommaStringSlice,
+									Required:    false,
+									Description: "returns all header values when `multivalue` request parameter is true",
+								},
+							},
+						}},
+					},
 				},
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handleConfigUIHeadersUpdate,
 					Summary:  "Configure the values to be returned for the UI header.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							// returns 200 with null `data`
+							Description: "OK",
+						}},
+					},
 				},
 				logical.DeleteOperation: &framework.PathOperation{
 					Callback: b.handleConfigUIHeadersDelete,
 					Summary:  "Remove a UI header.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 			},
 
@@ -99,6 +193,17 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 				logical.ListOperation: &framework.PathOperation{
 					Callback: b.handleConfigUIHeadersList,
 					Summary:  "Return a list of configured UI headers.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Fields: map[string]*framework.FieldSchema{
+								"keys": {
+									Type:        framework.TypeCommaStringSlice,
+									Description: "Lists of configured UI headers. Omitted if list is empty",
+									Required:    false,
+								},
+							},
+						}},
+					},
 				},
 			},
 
@@ -109,7 +214,7 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 		{
 			Pattern: "generate-root(/attempt)?$",
 			Fields: map[string]*framework.FieldSchema{
-				"pgp_key": &framework.FieldSchema{
+				"pgp_key": {
 					Type:        framework.TypeString,
 					Description: "Specifies a base64-encoded PGP public key.",
 				},
@@ -117,13 +222,112 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
 					Summary: "Read the configuration and progress of the current root generation attempt.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"nonce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"started": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"progress": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"required": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"complete": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"encoded_token": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"encoded_root_token": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"pgp_fingerprint": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"otp": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"otp_length": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+							},
+						}},
+					},
 				},
 				logical.UpdateOperation: &framework.PathOperation{
 					Summary:     "Initializes a new root generation attempt.",
 					Description: "Only a single root generation attempt can take place at a time. One (and only one) of otp or pgp_key are required.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"nonce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"started": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"progress": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"required": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"complete": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"encoded_token": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"encoded_root_token": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"pgp_fingerprint": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"otp": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"otp_length": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+							},
+						}},
+					},
 				},
 				logical.DeleteOperation: &framework.PathOperation{
 					Summary: "Cancels any in-progress root generation attempt.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 			},
 
@@ -133,19 +337,66 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 		{
 			Pattern: "generate-root/update$",
 			Fields: map[string]*framework.FieldSchema{
-				"key": &framework.FieldSchema{
+				"key": {
 					Type:        framework.TypeString,
-					Description: "Specifies a single master key share.",
+					Description: "Specifies a single unseal key share.",
 				},
-				"nonce": &framework.FieldSchema{
+				"nonce": {
 					Type:        framework.TypeString,
 					Description: "Specifies the nonce of the attempt.",
 				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{
-					Summary:     "Enter a single master key share to progress the root generation attempt.",
-					Description: "If the threshold number of master key shares is reached, Vault will complete the root generation and issue the new token. Otherwise, this API must be called multiple times until that threshold is met. The attempt nonce must be provided with each call.",
+					Summary:     "Enter a single unseal key share to progress the root generation attempt.",
+					Description: "If the threshold number of unseal key shares is reached, Vault will complete the root generation and issue the new token. Otherwise, this API must be called multiple times until that threshold is met. The attempt nonce must be provided with each call.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"nonce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"started": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"progress": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"required": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"complete": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"encoded_token": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"encoded_root_token": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"pgp_fingerprint": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"otp": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"otp_length": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+							},
+						}},
+					},
 				},
 			},
 
@@ -155,35 +406,35 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 		{
 			Pattern: "health$",
 			Fields: map[string]*framework.FieldSchema{
-				"standbyok": &framework.FieldSchema{
+				"standbyok": {
 					Type:        framework.TypeBool,
 					Description: "Specifies if being a standby should still return the active status code.",
 				},
-				"perfstandbyok": &framework.FieldSchema{
+				"perfstandbyok": {
 					Type:        framework.TypeBool,
 					Description: "Specifies if being a performance standby should still return the active status code.",
 				},
-				"activecode": &framework.FieldSchema{
+				"activecode": {
 					Type:        framework.TypeInt,
 					Description: "Specifies the status code for an active node.",
 				},
-				"standbycode": &framework.FieldSchema{
+				"standbycode": {
 					Type:        framework.TypeInt,
 					Description: "Specifies the status code for a standby node.",
 				},
-				"drsecondarycode": &framework.FieldSchema{
+				"drsecondarycode": {
 					Type:        framework.TypeInt,
 					Description: "Specifies the status code for a DR secondary node.",
 				},
-				"performancestandbycode": &framework.FieldSchema{
+				"performancestandbycode": {
 					Type:        framework.TypeInt,
 					Description: "Specifies the status code for a performance standby node.",
 				},
-				"sealedcode": &framework.FieldSchema{
+				"sealedcode": {
 					Type:        framework.TypeInt,
 					Description: "Specifies the status code for a sealed node.",
 				},
-				"uninitcode": &framework.FieldSchema{
+				"uninitcode": {
 					Type:        framework.TypeInt,
 					Description: "Specifies the status code for an uninitialized node.",
 				},
@@ -208,35 +459,35 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 		{
 			Pattern: "init$",
 			Fields: map[string]*framework.FieldSchema{
-				"pgp_keys": &framework.FieldSchema{
+				"pgp_keys": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: "Specifies an array of PGP public keys used to encrypt the output unseal keys. Ordering is preserved. The keys must be base64-encoded from their original binary representation. The size of this array must be the same as `secret_shares`.",
 				},
-				"root_token_pgp_key": &framework.FieldSchema{
+				"root_token_pgp_key": {
 					Type:        framework.TypeString,
 					Description: "Specifies a PGP public key used to encrypt the initial root token. The key must be base64-encoded from its original binary representation.",
 				},
-				"secret_shares": &framework.FieldSchema{
+				"secret_shares": {
 					Type:        framework.TypeInt,
-					Description: "Specifies the number of shares to split the master key into.",
+					Description: "Specifies the number of shares to split the unseal key into.",
 				},
-				"secret_threshold": &framework.FieldSchema{
+				"secret_threshold": {
 					Type:        framework.TypeInt,
-					Description: "Specifies the number of shares required to reconstruct the master key. This must be less than or equal secret_shares. If using Vault HSM with auto-unsealing, this value must be the same as `secret_shares`.",
+					Description: "Specifies the number of shares required to reconstruct the unseal key. This must be less than or equal secret_shares. If using Vault HSM with auto-unsealing, this value must be the same as `secret_shares`.",
 				},
-				"stored_shares": &framework.FieldSchema{
+				"stored_shares": {
 					Type:        framework.TypeInt,
 					Description: "Specifies the number of shares that should be encrypted by the HSM and stored for auto-unsealing. Currently must be the same as `secret_shares`.",
 				},
-				"recovery_shares": &framework.FieldSchema{
+				"recovery_shares": {
 					Type:        framework.TypeInt,
 					Description: "Specifies the number of shares to split the recovery key into.",
 				},
-				"recovery_threshold": &framework.FieldSchema{
+				"recovery_threshold": {
 					Type:        framework.TypeInt,
 					Description: " Specifies the number of shares required to reconstruct the recovery key. This must be less than or equal to `recovery_shares`.",
 				},
-				"recovery_pgp_keys": &framework.FieldSchema{
+				"recovery_pgp_keys": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: "Specifies an array of PGP public keys used to encrypt the output recovery keys. Ordering is preserved. The keys must be base64-encoded from their original binary representation. The size of this array must be the same as `recovery_shares`.",
 				},
@@ -255,17 +506,6 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 			HelpDescription: strings.TrimSpace(sysHelp["init"][1]),
 		},
 		{
-			Pattern: "leader$",
-
-			Operations: map[logical.Operation]framework.OperationHandler{
-				logical.ReadOperation: &framework.PathOperation{
-					Summary: "Returns the high availability status and current leader instance of Vault.",
-				},
-			},
-
-			HelpSynopsis: "Check the high availability status and current leader of Vault",
-		},
-		{
 			Pattern: "step-down$",
 
 			Operations: map[logical.Operation]framework.OperationHandler{
@@ -278,32 +518,155 @@ func (b *SystemBackend) configPaths() []*framework.Path {
 				},
 			},
 		},
+		{
+			Pattern: "loggers$",
+			Fields: map[string]*framework.FieldSchema{
+				"level": {
+					Type: framework.TypeString,
+					Description: "Log verbosity level. Supported values (in order of detail) are " +
+						"\"trace\", \"debug\", \"info\", \"warn\", and \"error\".",
+				},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleLoggersRead,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Read the log level for all existing loggers.",
+				},
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: b.handleLoggersWrite,
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Modify the log level for all existing loggers.",
+				},
+				logical.DeleteOperation: &framework.PathOperation{
+					Callback: b.handleLoggersDelete,
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Revert the all loggers to use log level provided in config.",
+				},
+			},
+		},
+		{
+			Pattern: "loggers/" + framework.MatchAllRegex("name"),
+			Fields: map[string]*framework.FieldSchema{
+				"name": {
+					Type:        framework.TypeString,
+					Description: "The name of the logger to be modified.",
+				},
+				"level": {
+					Type: framework.TypeString,
+					Description: "Log verbosity level. Supported values (in order of detail) are " +
+						"\"trace\", \"debug\", \"info\", \"warn\", and \"error\".",
+				},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleLoggersByNameRead,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Read the log level for a single logger.",
+				},
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: b.handleLoggersByNameWrite,
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Modify the log level of a single logger.",
+				},
+				logical.DeleteOperation: &framework.PathOperation{
+					Callback: b.handleLoggersByNameDelete,
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Revert a single logger to use log level provided in config.",
+				},
+			},
+		},
 	}
 }
 
 func (b *SystemBackend) rekeyPaths() []*framework.Path {
+	respFields := map[string]*framework.FieldSchema{
+		"nounce": {
+			Type:     framework.TypeString,
+			Required: true,
+		},
+		"started": {
+			Type:     framework.TypeString,
+			Required: true,
+		},
+		"t": {
+			Type:     framework.TypeInt,
+			Required: true,
+		},
+		"n": {
+			Type:     framework.TypeInt,
+			Required: true,
+		},
+		"progress": {
+			Type:     framework.TypeInt,
+			Required: true,
+		},
+		"required": {
+			Type:     framework.TypeInt,
+			Required: true,
+		},
+		"verification_required": {
+			Type:     framework.TypeBool,
+			Required: true,
+		},
+		"verification_nonce": {
+			Type:     framework.TypeString,
+			Required: true,
+		},
+		"backup": {
+			Type: framework.TypeBool,
+		},
+		"pgp_fingerprints": {
+			Type: framework.TypeCommaStringSlice,
+		},
+	}
+
 	return []*framework.Path{
 		{
 			Pattern: "rekey/init",
 
 			Fields: map[string]*framework.FieldSchema{
-				"secret_shares": &framework.FieldSchema{
+				"secret_shares": {
 					Type:        framework.TypeInt,
-					Description: "Specifies the number of shares to split the master key into.",
+					Description: "Specifies the number of shares to split the unseal key into.",
 				},
-				"secret_threshold": &framework.FieldSchema{
+				"secret_threshold": {
 					Type:        framework.TypeInt,
-					Description: "Specifies the number of shares required to reconstruct the master key. This must be less than or equal secret_shares. If using Vault HSM with auto-unsealing, this value must be the same as secret_shares.",
+					Description: "Specifies the number of shares required to reconstruct the unseal key. This must be less than or equal secret_shares. If using Vault HSM with auto-unsealing, this value must be the same as secret_shares.",
 				},
-				"pgp_keys": &framework.FieldSchema{
+				"pgp_keys": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: "Specifies an array of PGP public keys used to encrypt the output unseal keys. Ordering is preserved. The keys must be base64-encoded from their original binary representation. The size of this array must be the same as secret_shares.",
 				},
-				"backup": &framework.FieldSchema{
+				"backup": {
 					Type:        framework.TypeBool,
 					Description: "Specifies if using PGP-encrypted keys, whether Vault should also store a plaintext backup of the PGP-encrypted keys.",
 				},
-				"require_verification": &framework.FieldSchema{
+				"require_verification": {
 					Type:        framework.TypeBool,
 					Description: "Turns on verification functionality",
 				},
@@ -311,13 +674,30 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields:      respFields,
+						}},
+					},
 					Summary: "Reads the configuration and progress of the current rekey attempt.",
 				},
 				logical.UpdateOperation: &framework.PathOperation{
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields:      respFields,
+						}},
+					},
 					Summary:     "Initializes a new rekey attempt.",
 					Description: "Only a single rekey attempt can take place at a time, and changing the parameters of a rekey requires canceling and starting a new rekey, which will also provide a new nonce.",
 				},
 				logical.DeleteOperation: &framework.PathOperation{
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+						}},
+					},
 					Summary:     "Cancels any in-progress rekey.",
 					Description: "This clears the rekey settings as well as any progress made. This must be called to change the parameters of the rekey. Note: verification is still a part of a rekey. If rekeying is canceled during the verification flow, the current unseal keys remain valid.",
 				},
@@ -331,11 +711,35 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
 					Callback: b.handleRekeyRetrieveBarrier,
-					Summary:  "Return the backup copy of PGP-encrypted unseal keys.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"nonce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"keys": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+								"keys_base64": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+							},
+						}},
+					},
+					Summary: "Return the backup copy of PGP-encrypted unseal keys.",
 				},
 				logical.DeleteOperation: &framework.PathOperation{
 					Callback: b.handleRekeyDeleteBarrier,
-					Summary:  "Delete the backup copy of PGP-encrypted unseal keys.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Delete the backup copy of PGP-encrypted unseal keys.",
 				},
 			},
 
@@ -348,9 +752,37 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 
 			Fields: map[string]*framework.FieldSchema{},
 
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.ReadOperation:   b.handleRekeyRetrieveRecovery,
-				logical.DeleteOperation: b.handleRekeyDeleteRecovery,
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleRekeyRetrieveRecovery,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"nonce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"keys": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+								"keys_base64": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+							},
+						}},
+					},
+				},
+				logical.DeleteOperation: &framework.PathOperation{
+					Callback: b.handleRekeyDeleteRecovery,
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
+				},
 			},
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["rekey_backup"][0]),
@@ -360,11 +792,11 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 			Pattern: "rekey/update",
 
 			Fields: map[string]*framework.FieldSchema{
-				"key": &framework.FieldSchema{
+				"key": {
 					Type:        framework.TypeString,
-					Description: "Specifies a single master key share.",
+					Description: "Specifies a single unseal key share.",
 				},
-				"nonce": &framework.FieldSchema{
+				"nonce": {
 					Type:        framework.TypeString,
 					Description: "Specifies the nonce of the rekey attempt.",
 				},
@@ -372,7 +804,56 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{
-					Summary: "Enter a single master key share to progress the rekey of the Vault.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"nounce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"complete": {
+									Type: framework.TypeBool,
+								},
+								"started": {
+									Type: framework.TypeString,
+								},
+								"t": {
+									Type: framework.TypeInt,
+								},
+								"n": {
+									Type: framework.TypeInt,
+								},
+								"progress": {
+									Type: framework.TypeInt,
+								},
+								"required": {
+									Type: framework.TypeInt,
+								},
+								"keys": {
+									Type: framework.TypeCommaStringSlice,
+								},
+								"keys_base64": {
+									Type: framework.TypeCommaStringSlice,
+								},
+								"verification_required": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"verification_nonce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"backup": {
+									Type: framework.TypeBool,
+								},
+								"pgp_fingerprints": {
+									Type: framework.TypeCommaStringSlice,
+								},
+							},
+						}},
+					},
+					Summary: "Enter a single unseal key share to progress the rekey of the Vault.",
 				},
 			},
 		},
@@ -380,11 +861,11 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 			Pattern: "rekey/verify",
 
 			Fields: map[string]*framework.FieldSchema{
-				"key": &framework.FieldSchema{
+				"key": {
 					Type:        framework.TypeString,
-					Description: "Specifies a single master share key from the new set of shares.",
+					Description: "Specifies a single unseal share key from the new set of shares.",
 				},
-				"nonce": &framework.FieldSchema{
+				"nonce": {
 					Type:        framework.TypeString,
 					Description: "Specifies the nonce of the rekey verification operation.",
 				},
@@ -392,28 +873,84 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"nounce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"started": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"t": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"n": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"progress": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+							},
+						}},
+					},
 					Summary: "Read the configuration and progress of the current rekey verification attempt.",
 				},
 				logical.DeleteOperation: &framework.PathOperation{
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"nounce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"started": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"t": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"n": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"progress": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+							},
+						}},
+					},
 					Summary:     "Cancel any in-progress rekey verification operation.",
 					Description: "This clears any progress made and resets the nonce. Unlike a `DELETE` against `sys/rekey/init`, this only resets the current verification operation, not the entire rekey atttempt.",
 				},
 				logical.UpdateOperation: &framework.PathOperation{
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"nounce": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"complete": {
+									Type: framework.TypeBool,
+								},
+							},
+						}},
+					},
 					Summary: "Enter a single new key share to progress the rekey verification operation.",
 				},
 			},
-		},
-
-		{
-			Pattern: "seal-status$",
-			Operations: map[logical.Operation]framework.OperationHandler{
-				logical.ReadOperation: &framework.PathOperation{
-					Summary: "Check the seal status of a Vault.",
-				},
-			},
-
-			HelpSynopsis:    strings.TrimSpace(sysHelp["seal-status"][0]),
-			HelpDescription: strings.TrimSpace(sysHelp["seal-status"][1]),
 		},
 
 		{
@@ -430,11 +967,11 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 		{
 			Pattern: "unseal$",
 			Fields: map[string]*framework.FieldSchema{
-				"key": &framework.FieldSchema{
+				"key": {
 					Type:        framework.TypeString,
-					Description: "Specifies a single master key share. This is required unless reset is true.",
+					Description: "Specifies a single unseal key share. This is required unless reset is true.",
 				},
-				"reset": &framework.FieldSchema{
+				"reset": {
 					Type:        framework.TypeBool,
 					Description: "Specifies if previously-provided unseal keys are discarded and the unseal process is reset.",
 				},
@@ -452,24 +989,90 @@ func (b *SystemBackend) rekeyPaths() []*framework.Path {
 	}
 }
 
+func (b *SystemBackend) statusPaths() []*framework.Path {
+	return []*framework.Path{
+		{
+			Pattern: "leader$",
+
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleLeaderStatus,
+					Summary:  "Returns the high availability status and current leader instance of Vault.",
+				},
+			},
+
+			HelpSynopsis: "Check the high availability status and current leader of Vault",
+		},
+		{
+			Pattern: "seal-status$",
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleSealStatus,
+					Summary:  "Check the seal status of a Vault.",
+				},
+			},
+
+			HelpSynopsis:    strings.TrimSpace(sysHelp["seal-status"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["seal-status"][1]),
+		},
+		{
+			Pattern: "ha-status$",
+
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleHAStatus,
+					Summary:  "Check the HA status of a Vault cluster",
+				},
+			},
+
+			HelpSynopsis:    strings.TrimSpace(sysHelp["ha-status"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["ha-status"][1]),
+		},
+		{
+			Pattern: "version-history/$",
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ListOperation: &framework.PathOperation{
+					Callback: b.handleVersionHistoryList,
+					Summary:  "Returns map of historical version change entries",
+				},
+			},
+
+			HelpSynopsis:    strings.TrimSpace(sysHelp["version-history"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["version-history"][1]),
+		},
+	}
+}
+
 func (b *SystemBackend) auditPaths() []*framework.Path {
 	return []*framework.Path{
 		{
 			Pattern: "audit-hash/(?P<path>.+)",
 
 			Fields: map[string]*framework.FieldSchema{
-				"path": &framework.FieldSchema{
+				"path": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["audit_path"][0]),
 				},
 
-				"input": &framework.FieldSchema{
+				"input": {
 					Type: framework.TypeString,
 				},
 			},
-
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.UpdateOperation: b.handleAuditHash,
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: b.handleAuditHash,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"hash": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+							},
+						}},
+					},
+				},
 			},
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["audit-hash"][0]),
@@ -483,6 +1086,13 @@ func (b *SystemBackend) auditPaths() []*framework.Path {
 				logical.ReadOperation: &framework.PathOperation{
 					Callback: b.handleAuditTable,
 					Summary:  "List the enabled audit devices.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							// this response has dynamic keys
+							Description: "OK",
+							Fields:      nil,
+						}},
+					},
 				},
 			},
 
@@ -494,23 +1104,23 @@ func (b *SystemBackend) auditPaths() []*framework.Path {
 			Pattern: "audit/(?P<path>.+)",
 
 			Fields: map[string]*framework.FieldSchema{
-				"path": &framework.FieldSchema{
+				"path": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["audit_path"][0]),
 				},
-				"type": &framework.FieldSchema{
+				"type": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["audit_type"][0]),
 				},
-				"description": &framework.FieldSchema{
+				"description": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["audit_desc"][0]),
 				},
-				"options": &framework.FieldSchema{
+				"options": {
 					Type:        framework.TypeKVPairs,
 					Description: strings.TrimSpace(sysHelp["audit_opts"][0]),
 				},
-				"local": &framework.FieldSchema{
+				"local": {
 					Type:        framework.TypeBool,
 					Default:     false,
 					Description: strings.TrimSpace(sysHelp["mount_local"][0]),
@@ -521,10 +1131,20 @@ func (b *SystemBackend) auditPaths() []*framework.Path {
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handleEnableAudit,
 					Summary:  "Enable a new audit device at the supplied path.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 				logical.DeleteOperation: &framework.PathOperation{
 					Callback: b.handleDisableAudit,
 					Summary:  "Disable the audit device at the given path.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 			},
 
@@ -536,10 +1156,10 @@ func (b *SystemBackend) auditPaths() []*framework.Path {
 			Pattern: "config/auditing/request-headers/(?P<header>.+)",
 
 			Fields: map[string]*framework.FieldSchema{
-				"header": &framework.FieldSchema{
+				"header": {
 					Type: framework.TypeString,
 				},
-				"hmac": &framework.FieldSchema{
+				"hmac": {
 					Type: framework.TypeBool,
 				},
 			},
@@ -548,14 +1168,31 @@ func (b *SystemBackend) auditPaths() []*framework.Path {
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handleAuditedHeaderUpdate,
 					Summary:  "Enable auditing of a header.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 				logical.DeleteOperation: &framework.PathOperation{
 					Callback: b.handleAuditedHeaderDelete,
 					Summary:  "Disable auditing of the given request header.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 				logical.ReadOperation: &framework.PathOperation{
 					Callback: b.handleAuditedHeaderRead,
 					Summary:  "List the information for the given request header.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							// the response keys are dynamic
+							Fields: nil,
+						}},
+					},
 				},
 			},
 
@@ -570,6 +1207,17 @@ func (b *SystemBackend) auditPaths() []*framework.Path {
 				logical.ReadOperation: &framework.PathOperation{
 					Callback: b.handleAuditedHeadersRead,
 					Summary:  "List the request headers that are configured to be audited.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"headers": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+							},
+						}},
+					},
 				},
 			},
 
@@ -593,6 +1241,38 @@ func (b *SystemBackend) sealPaths() []*framework.Path {
 		},
 
 		{
+			Pattern: "rotate/config$",
+			Fields: map[string]*framework.FieldSchema{
+				"enabled": {
+					Type:        framework.TypeBool,
+					Description: strings.TrimSpace(sysHelp["rotation-enabled"][0]),
+				},
+				"max_operations": {
+					Type:        framework.TypeInt64,
+					Description: strings.TrimSpace(sysHelp["rotation-max-operations"][0]),
+				},
+				"interval": {
+					Type:        framework.TypeDurationSecond,
+					Description: strings.TrimSpace(sysHelp["rotation-interval"][0]),
+				},
+			},
+
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleKeyRotationConfigRead,
+				},
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback:                    b.handleKeyRotationConfigUpdate,
+					ForwardPerformanceSecondary: true,
+					ForwardPerformanceStandby:   true,
+				},
+			},
+
+			HelpSynopsis:    strings.TrimSpace(sysHelp["rotate-config"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["rotate-config"][1]),
+		},
+
+		{
 			Pattern: "rotate$",
 
 			Callbacks: map[logical.Operation]framework.OperationFunc{
@@ -610,48 +1290,103 @@ func (b *SystemBackend) pluginsCatalogCRUDPath() *framework.Path {
 		Pattern: "plugins/catalog(/(?P<type>auth|database|secret))?/(?P<name>.+)",
 
 		Fields: map[string]*framework.FieldSchema{
-			"name": &framework.FieldSchema{
+			"name": {
 				Type:        framework.TypeString,
 				Description: strings.TrimSpace(sysHelp["plugin-catalog_name"][0]),
 			},
-			"type": &framework.FieldSchema{
+			"type": {
 				Type:        framework.TypeString,
 				Description: strings.TrimSpace(sysHelp["plugin-catalog_type"][0]),
 			},
-			"sha256": &framework.FieldSchema{
+			"sha256": {
 				Type:        framework.TypeString,
 				Description: strings.TrimSpace(sysHelp["plugin-catalog_sha-256"][0]),
 			},
-			"sha_256": &framework.FieldSchema{
+			"sha_256": {
 				Type:        framework.TypeString,
 				Description: strings.TrimSpace(sysHelp["plugin-catalog_sha-256"][0]),
 			},
-			"command": &framework.FieldSchema{
+			"command": {
 				Type:        framework.TypeString,
 				Description: strings.TrimSpace(sysHelp["plugin-catalog_command"][0]),
 			},
-			"args": &framework.FieldSchema{
+			"args": {
 				Type:        framework.TypeStringSlice,
 				Description: strings.TrimSpace(sysHelp["plugin-catalog_args"][0]),
 			},
-			"env": &framework.FieldSchema{
+			"env": {
 				Type:        framework.TypeStringSlice,
 				Description: strings.TrimSpace(sysHelp["plugin-catalog_env"][0]),
+			},
+			"version": {
+				Type:        framework.TypeString,
+				Description: strings.TrimSpace(sysHelp["plugin-catalog_version"][0]),
 			},
 		},
 
 		Operations: map[logical.Operation]framework.OperationHandler{
 			logical.UpdateOperation: &framework.PathOperation{
 				Callback: b.handlePluginCatalogUpdate,
-				Summary:  "Register a new plugin, or updates an existing one with the supplied name.",
+				Responses: map[int][]framework.Response{
+					http.StatusOK: {{
+						Description: "OK",
+					}},
+				},
+				Summary: "Register a new plugin, or updates an existing one with the supplied name.",
 			},
 			logical.DeleteOperation: &framework.PathOperation{
 				Callback: b.handlePluginCatalogDelete,
-				Summary:  "Remove the plugin with the given name.",
+				Responses: map[int][]framework.Response{
+					http.StatusOK: {{
+						Description: "OK",
+						Fields:      map[string]*framework.FieldSchema{},
+					}},
+				},
+				Summary: "Remove the plugin with the given name.",
 			},
 			logical.ReadOperation: &framework.PathOperation{
 				Callback: b.handlePluginCatalogRead,
-				Summary:  "Return the configuration data for the plugin with the given name.",
+				Responses: map[int][]framework.Response{
+					http.StatusOK: {{
+						Description: "OK",
+						Fields: map[string]*framework.FieldSchema{
+							"name": {
+								Type:        framework.TypeString,
+								Description: strings.TrimSpace(sysHelp["plugin-catalog_name"][0]),
+								Required:    true,
+							},
+							"sha256": {
+								Type:        framework.TypeString,
+								Description: strings.TrimSpace(sysHelp["plugin-catalog_sha-256"][0]),
+								Required:    true,
+							},
+							"command": {
+								Type:        framework.TypeString,
+								Description: strings.TrimSpace(sysHelp["plugin-catalog_command"][0]),
+								Required:    true,
+							},
+							"args": {
+								Type:        framework.TypeStringSlice,
+								Description: strings.TrimSpace(sysHelp["plugin-catalog_args"][0]),
+								Required:    true,
+							},
+							"version": {
+								Type:        framework.TypeString,
+								Description: strings.TrimSpace(sysHelp["plugin-catalog_version"][0]),
+								Required:    true,
+							},
+							"builtin": {
+								Type:     framework.TypeBool,
+								Required: true,
+							},
+							"deprecation_status": {
+								Type:     framework.TypeString,
+								Required: false,
+							},
+						},
+					}},
+				},
+				Summary: "Return the configuration data for the plugin with the given name.",
 			},
 		},
 
@@ -666,7 +1401,7 @@ func (b *SystemBackend) pluginsCatalogListPaths() []*framework.Path {
 			Pattern: "plugins/catalog/(?P<type>auth|database|secret)/?$",
 
 			Fields: map[string]*framework.FieldSchema{
-				"type": &framework.FieldSchema{
+				"type": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["plugin-catalog_type"][0]),
 				},
@@ -675,7 +1410,19 @@ func (b *SystemBackend) pluginsCatalogListPaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ListOperation: &framework.PathOperation{
 					Callback: b.handlePluginCatalogTypedList,
-					Summary:  "List the plugins in the catalog.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"keys": {
+									Type:        framework.TypeStringSlice,
+									Description: "List of plugin names in the catalog",
+									Required:    true,
+								},
+							},
+						}},
+					},
+					Summary: "List the plugins in the catalog.",
 				},
 			},
 
@@ -685,8 +1432,21 @@ func (b *SystemBackend) pluginsCatalogListPaths() []*framework.Path {
 		{
 			Pattern: "plugins/catalog/?$",
 
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.ReadOperation: b.handlePluginCatalogUntypedList,
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handlePluginCatalogUntypedList,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"detailed": {
+									Type:     framework.TypeMap,
+									Required: false,
+								},
+							},
+						}},
+					},
+				},
 			},
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["plugin-catalog-list-all"][0]),
@@ -700,15 +1460,15 @@ func (b *SystemBackend) pluginsReloadPath() *framework.Path {
 		Pattern: "plugins/reload/backend$",
 
 		Fields: map[string]*framework.FieldSchema{
-			"plugin": &framework.FieldSchema{
+			"plugin": {
 				Type:        framework.TypeString,
 				Description: strings.TrimSpace(sysHelp["plugin-backend-reload-plugin"][0]),
 			},
-			"mounts": &framework.FieldSchema{
+			"mounts": {
 				Type:        framework.TypeCommaStringSlice,
 				Description: strings.TrimSpace(sysHelp["plugin-backend-reload-mounts"][0]),
 			},
-			"scope": &framework.FieldSchema{
+			"scope": {
 				Type:        framework.TypeString,
 				Description: strings.TrimSpace(sysHelp["plugin-backend-reload-scope"][0]),
 			},
@@ -716,7 +1476,27 @@ func (b *SystemBackend) pluginsReloadPath() *framework.Path {
 
 		Operations: map[logical.Operation]framework.OperationHandler{
 			logical.UpdateOperation: &framework.PathOperation{
-				Callback:    b.handlePluginReloadUpdate,
+				Callback: b.handlePluginReloadUpdate,
+				Responses: map[int][]framework.Response{
+					http.StatusOK: {{
+						Description: "OK",
+						Fields: map[string]*framework.FieldSchema{
+							"reload_id": {
+								Type:     framework.TypeString,
+								Required: true,
+							},
+						},
+					}},
+					http.StatusAccepted: {{
+						Description: "OK",
+						Fields: map[string]*framework.FieldSchema{
+							"reload_id": {
+								Type:     framework.TypeString,
+								Required: true,
+							},
+						},
+					}},
+				},
 				Summary:     "Reload mounted plugin backends.",
 				Description: "Either the plugin name (`plugin`) or the desired plugin backend mounts (`mounts`) must be provided, but not both. In the case that the plugin name is provided, all mounted paths that use that plugin backend will be reloaded.  If (`scope`) is provided and is (`global`), the plugin(s) are reloaded globally.",
 			},
@@ -732,12 +1512,12 @@ func (b *SystemBackend) toolsPaths() []*framework.Path {
 		{
 			Pattern: "tools/hash" + framework.OptionalParamRegex("urlalgorithm"),
 			Fields: map[string]*framework.FieldSchema{
-				"input": &framework.FieldSchema{
+				"input": {
 					Type:        framework.TypeString,
 					Description: "The base64-encoded input data",
 				},
 
-				"algorithm": &framework.FieldSchema{
+				"algorithm": {
 					Type:    framework.TypeString,
 					Default: "sha2-256",
 					Description: `Algorithm to use (POST body parameter). Valid values are:
@@ -750,12 +1530,12 @@ func (b *SystemBackend) toolsPaths() []*framework.Path {
 			Defaults to "sha2-256".`,
 				},
 
-				"urlalgorithm": &framework.FieldSchema{
+				"urlalgorithm": {
 					Type:        framework.TypeString,
 					Description: `Algorithm to use (POST URL parameter)`,
 				},
 
-				"format": &framework.FieldSchema{
+				"format": {
 					Type:        framework.TypeString,
 					Default:     "hex",
 					Description: `Encoding format to use. Can be "hex" or "base64". Defaults to "hex".`,
@@ -771,23 +1551,29 @@ func (b *SystemBackend) toolsPaths() []*framework.Path {
 		},
 
 		{
-			Pattern: "tools/random" + framework.OptionalParamRegex("urlbytes"),
+			Pattern: "tools/random(/" + framework.GenericNameRegex("source") + ")?" + framework.OptionalParamRegex("urlbytes"),
 			Fields: map[string]*framework.FieldSchema{
-				"urlbytes": &framework.FieldSchema{
+				"urlbytes": {
 					Type:        framework.TypeString,
 					Description: "The number of bytes to generate (POST URL parameter)",
 				},
 
-				"bytes": &framework.FieldSchema{
+				"bytes": {
 					Type:        framework.TypeInt,
 					Default:     32,
 					Description: "The number of bytes to generate (POST body parameter). Defaults to 32 (256 bits).",
 				},
 
-				"format": &framework.FieldSchema{
+				"format": {
 					Type:        framework.TypeString,
 					Default:     "base64",
 					Description: `Encoding format to use. Can be "hex" or "base64". Defaults to "base64".`,
+				},
+
+				"source": {
+					Type:        framework.TypeString,
+					Default:     "platform",
+					Description: `Which system to source random data from, ether "platform", "seal", or "all".`,
 				},
 			},
 
@@ -806,24 +1592,44 @@ func (b *SystemBackend) internalPaths() []*framework.Path {
 		{
 			Pattern: "internal/specs/openapi",
 			Fields: map[string]*framework.FieldSchema{
-				"context": &framework.FieldSchema{
+				"context": {
 					Type:        framework.TypeString,
 					Description: "Context string appended to every operationId",
+				},
+				"generic_mount_paths": {
+					Type:        framework.TypeBool,
+					Description: "Use generic mount paths",
+					Query:       true,
+					Default:     false,
 				},
 			},
 			Callbacks: map[logical.Operation]framework.OperationFunc{
 				logical.ReadOperation:   b.pathInternalOpenAPI,
 				logical.UpdateOperation: b.pathInternalOpenAPI,
 			},
+			HelpSynopsis: "Generate an OpenAPI 3 document of all mounted paths.",
 		},
 		{
-			Pattern: "internal/specs/openapi",
+			Pattern: "internal/ui/feature-flags",
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
-					Callback: b.pathInternalOpenAPI,
-					Summary:  "Generate an OpenAPI 3 document of all mounted paths.",
+					// callback is absent because this is an unauthenticated method
+					Summary: "Lists enabled feature flags.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"feature_flags": {
+									Type:     framework.TypeCommaStringSlice,
+									Required: true,
+								},
+							},
+						}},
+					},
 				},
 			},
+			HelpSynopsis:    strings.TrimSpace(sysHelp["internal-ui-feature-flags"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["internal-ui-feature-flags"][1]),
 		},
 		{
 			Pattern: "internal/ui/mounts",
@@ -831,6 +1637,23 @@ func (b *SystemBackend) internalPaths() []*framework.Path {
 				logical.ReadOperation: &framework.PathOperation{
 					Callback: b.pathInternalUIMountsRead,
 					Summary:  "Lists all enabled and visible auth and secrets mounts.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"secret": {
+									Description: "secret mounts",
+									Type:        framework.TypeMap,
+									Required:    true,
+								},
+								"auth": {
+									Description: "auth mounts",
+									Type:        framework.TypeMap,
+									Required:    true,
+								},
+							},
+						}},
+					},
 				},
 			},
 			HelpSynopsis:    strings.TrimSpace(sysHelp["internal-ui-mounts"][0]),
@@ -839,7 +1662,7 @@ func (b *SystemBackend) internalPaths() []*framework.Path {
 		{
 			Pattern: "internal/ui/mounts/(?P<path>.+)",
 			Fields: map[string]*framework.FieldSchema{
-				"path": &framework.FieldSchema{
+				"path": {
 					Type:        framework.TypeString,
 					Description: "The path of the mount.",
 				},
@@ -848,6 +1671,65 @@ func (b *SystemBackend) internalPaths() []*framework.Path {
 				logical.ReadOperation: &framework.PathOperation{
 					Callback: b.pathInternalUIMountRead,
 					Summary:  "Return information about the given mount.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"type": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"description": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"accessor": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"local": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"seal_wrap": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"external_entropy_access": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"options": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+								"uuid": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"plugin_version": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"running_plugin_version": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"running_sha256": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"path": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"config": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+							},
+						}},
+					},
 				},
 			},
 			HelpSynopsis:    strings.TrimSpace(sysHelp["internal-ui-mounts"][0]),
@@ -857,8 +1739,19 @@ func (b *SystemBackend) internalPaths() []*framework.Path {
 			Pattern: "internal/ui/namespaces",
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
-					Callback:    pathInternalUINamespacesRead(b),
-					Unpublished: true,
+					Callback: pathInternalUINamespacesRead(b),
+					Summary:  "Backwards compatibility is not guaranteed for this API",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"keys": {
+									Type:        framework.TypeCommaStringSlice,
+									Description: "field is only returned if there are one or more namespaces",
+								},
+							},
+						}},
+					},
 				},
 			},
 			HelpSynopsis:    strings.TrimSpace(sysHelp["internal-ui-namespaces"][0]),
@@ -868,8 +1761,31 @@ func (b *SystemBackend) internalPaths() []*framework.Path {
 			Pattern: "internal/ui/resultant-acl",
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
-					Callback:    b.pathInternalUIResultantACL,
-					Unpublished: true,
+					Callback: b.pathInternalUIResultantACL,
+					Summary:  "Backwards compatibility is not guaranteed for this API",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "empty response returned if no client token",
+							Fields:      nil,
+						}},
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"root": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"exact_paths": {
+									Type:     framework.TypeMap,
+									Required: false,
+								},
+								"glob_paths": {
+									Type:     framework.TypeMap,
+									Required: false,
+								},
+							},
+						}},
+					},
 				},
 			},
 			HelpSynopsis:    strings.TrimSpace(sysHelp["internal-ui-resultant-acl"][0]),
@@ -879,8 +1795,10 @@ func (b *SystemBackend) internalPaths() []*framework.Path {
 			Pattern: "internal/counters/requests",
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
-					Callback:    b.pathInternalCountersRequests,
-					Unpublished: true,
+					Callback: b.pathInternalCountersRequests,
+					Summary:  "Backwards compatibility is not guaranteed for this API",
+					// callback only returns errors
+					Responses: nil,
 				},
 			},
 			HelpSynopsis:    strings.TrimSpace(sysHelp["internal-counters-requests"][0]),
@@ -890,8 +1808,19 @@ func (b *SystemBackend) internalPaths() []*framework.Path {
 			Pattern: "internal/counters/tokens",
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
-					Callback:    b.pathInternalCountersTokens,
-					Unpublished: true,
+					Callback: b.pathInternalCountersTokens,
+					Summary:  "Backwards compatibility is not guaranteed for this API",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"counters": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+							},
+						}},
+					},
 				},
 			},
 			HelpSynopsis:    strings.TrimSpace(sysHelp["internal-counters-tokens"][0]),
@@ -901,12 +1830,45 @@ func (b *SystemBackend) internalPaths() []*framework.Path {
 			Pattern: "internal/counters/entities",
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
-					Callback:    b.pathInternalCountersEntities,
-					Unpublished: true,
+					Callback: b.pathInternalCountersEntities,
+					Summary:  "Backwards compatibility is not guaranteed for this API",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"counters": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+							},
+						}},
+					},
 				},
 			},
 			HelpSynopsis:    strings.TrimSpace(sysHelp["internal-counters-entities"][0]),
 			HelpDescription: strings.TrimSpace(sysHelp["internal-counters-entities"][1]),
+		},
+	}
+}
+
+func (b *SystemBackend) introspectionPaths() []*framework.Path {
+	return []*framework.Path{
+		{
+			Pattern: "internal/inspect/router/" + framework.GenericNameRegex("tag"),
+			Fields: map[string]*framework.FieldSchema{
+				"tag": {
+					Type:        framework.TypeString,
+					Description: "Name of subtree being observed",
+				},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.pathInternalInspectRouter,
+					Summary:  "Expose the route entry and mount entry tables present in the router",
+				},
+			},
+			HelpSynopsis:    strings.TrimSpace(sysHelp["internal-inspect-router"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["internal-inspect-router"][1]),
 		},
 	}
 }
@@ -917,23 +1879,32 @@ func (b *SystemBackend) capabilitiesPaths() []*framework.Path {
 			Pattern: "capabilities-accessor$",
 
 			Fields: map[string]*framework.FieldSchema{
-				"accessor": &framework.FieldSchema{
+				"accessor": {
 					Type:        framework.TypeString,
 					Description: "Accessor of the token for which capabilities are being queried.",
 				},
-				"path": &framework.FieldSchema{
+				"path": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: "Use 'paths' instead.",
 					Deprecated:  true,
 				},
-				"paths": &framework.FieldSchema{
+				"paths": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: "Paths on which capabilities are being queried.",
 				},
 			},
 
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.UpdateOperation: b.handleCapabilitiesAccessor,
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: b.handleCapabilitiesAccessor,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							// response keys are dynamic
+							Fields: nil,
+						}},
+					},
+				},
 			},
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["capabilities_accessor"][0]),
@@ -944,23 +1915,32 @@ func (b *SystemBackend) capabilitiesPaths() []*framework.Path {
 			Pattern: "capabilities$",
 
 			Fields: map[string]*framework.FieldSchema{
-				"token": &framework.FieldSchema{
+				"token": {
 					Type:        framework.TypeString,
 					Description: "Token for which capabilities are being queried.",
 				},
-				"path": &framework.FieldSchema{
+				"path": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: "Use 'paths' instead.",
 					Deprecated:  true,
 				},
-				"paths": &framework.FieldSchema{
+				"paths": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: "Paths on which capabilities are being queried.",
 				},
 			},
 
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.UpdateOperation: b.handleCapabilities,
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: b.handleCapabilities,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							// response keys are dynamic
+							Fields: nil,
+						}},
+					},
+				},
 			},
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["capabilities"][0]),
@@ -971,23 +1951,32 @@ func (b *SystemBackend) capabilitiesPaths() []*framework.Path {
 			Pattern: "capabilities-self$",
 
 			Fields: map[string]*framework.FieldSchema{
-				"token": &framework.FieldSchema{
+				"token": {
 					Type:        framework.TypeString,
 					Description: "Token for which capabilities are being queried.",
 				},
-				"path": &framework.FieldSchema{
+				"path": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: "Use 'paths' instead.",
 					Deprecated:  true,
 				},
-				"paths": &framework.FieldSchema{
+				"paths": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: "Paths on which capabilities are being queried.",
 				},
 			},
 
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.UpdateOperation: b.handleCapabilities,
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: b.handleCapabilities,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							// response keys are dynamic
+							Fields: nil,
+						}},
+					},
+				},
 			},
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["capabilities_self"][0]),
@@ -1002,7 +1991,7 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 			Pattern: "leases/lookup/(?P<prefix>.+?)?",
 
 			Fields: map[string]*framework.FieldSchema{
-				"prefix": &framework.FieldSchema{
+				"prefix": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["leases-list-prefix"][0]),
 				},
@@ -1011,7 +2000,18 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ListOperation: &framework.PathOperation{
 					Callback: b.handleLeaseLookupList,
-					Summary:  "Returns a list of lease ids.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"keys": {
+									Type:        framework.TypeCommaStringSlice,
+									Description: "A list of lease ids",
+									Required:    false,
+								},
+							},
+						}},
+					},
 				},
 			},
 
@@ -1023,7 +2023,7 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 			Pattern: "leases/lookup",
 
 			Fields: map[string]*framework.FieldSchema{
-				"lease_id": &framework.FieldSchema{
+				"lease_id": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["lease_id"][0]),
 				},
@@ -1032,7 +2032,43 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handleLeaseLookup,
-					Summary:  "Retrieve lease metadata.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"id": {
+									Type:        framework.TypeString,
+									Description: "Lease id",
+									Required:    true,
+								},
+								"issue_time": {
+									Type:        framework.TypeTime,
+									Description: "Timestamp for the lease's issue time",
+									Required:    true,
+								},
+								"renewable": {
+									Type:        framework.TypeBool,
+									Description: "True if the lease is able to be renewed",
+									Required:    true,
+								},
+								"expire_time": {
+									Type:        framework.TypeTime,
+									Description: "Optional lease expiry time ",
+									Required:    true,
+								},
+								"last_renewal": {
+									Type:        framework.TypeTime,
+									Description: "Optional Timestamp of the last time the lease was renewed",
+									Required:    true,
+								},
+								"ttl": {
+									Type:        framework.TypeInt,
+									Description: "Time to Live set for the lease, returns 0 if unset",
+									Required:    true,
+								},
+							},
+						}},
+					},
 				},
 			},
 
@@ -1044,15 +2080,15 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 			Pattern: "(leases/)?renew" + framework.OptionalParamRegex("url_lease_id"),
 
 			Fields: map[string]*framework.FieldSchema{
-				"url_lease_id": &framework.FieldSchema{
+				"url_lease_id": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["lease_id"][0]),
 				},
-				"lease_id": &framework.FieldSchema{
+				"lease_id": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["lease_id"][0]),
 				},
-				"increment": &framework.FieldSchema{
+				"increment": {
 					Type:        framework.TypeDurationSecond,
 					Description: strings.TrimSpace(sysHelp["increment"][0]),
 				},
@@ -1061,7 +2097,12 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handleRenew,
-					Summary:  "Renews a lease, requesting to extend the lease.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Renews a lease, requesting to extend the lease.",
 				},
 			},
 
@@ -1073,15 +2114,15 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 			Pattern: "(leases/)?revoke" + framework.OptionalParamRegex("url_lease_id"),
 
 			Fields: map[string]*framework.FieldSchema{
-				"url_lease_id": &framework.FieldSchema{
+				"url_lease_id": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["lease_id"][0]),
 				},
-				"lease_id": &framework.FieldSchema{
+				"lease_id": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["lease_id"][0]),
 				},
-				"sync": &framework.FieldSchema{
+				"sync": {
 					Type:        framework.TypeBool,
 					Default:     true,
 					Description: strings.TrimSpace(sysHelp["revoke-sync"][0]),
@@ -1091,7 +2132,12 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handleRevoke,
-					Summary:  "Revokes a lease immediately.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Revokes a lease immediately.",
 				},
 			},
 
@@ -1103,7 +2149,7 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 			Pattern: "(leases/)?revoke-force/(?P<prefix>.+)",
 
 			Fields: map[string]*framework.FieldSchema{
-				"prefix": &framework.FieldSchema{
+				"prefix": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["revoke-force-path"][0]),
 				},
@@ -1111,7 +2157,12 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{
-					Callback:    b.handleRevokeForce,
+					Callback: b.handleRevokeForce,
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 					Summary:     "Revokes all secrets or tokens generated under a given prefix immediately",
 					Description: "Unlike `/sys/leases/revoke-prefix`, this path ignores backend errors encountered during revocation. This is potentially very dangerous and should only be used in specific emergency situations where errors in the backend or the connected backend service prevent normal revocation.\n\nBy ignoring these errors, Vault abdicates responsibility for ensuring that the issued credentials or secrets are properly revoked and/or cleaned up. Access to this endpoint should be tightly controlled.",
 				},
@@ -1125,11 +2176,11 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 			Pattern: "(leases/)?revoke-prefix/(?P<prefix>.+)",
 
 			Fields: map[string]*framework.FieldSchema{
-				"prefix": &framework.FieldSchema{
+				"prefix": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["revoke-prefix-path"][0]),
 				},
-				"sync": &framework.FieldSchema{
+				"sync": {
 					Type:        framework.TypeBool,
 					Default:     true,
 					Description: strings.TrimSpace(sysHelp["revoke-sync"][0]),
@@ -1139,7 +2190,12 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handleRevokePrefix,
-					Summary:  "Revokes all secrets (via a lease ID prefix) or tokens (via the tokens' path property) generated under a given prefix immediately.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Revokes all secrets (via a lease ID prefix) or tokens (via the tokens' path property) generated under a given prefix immediately.",
 				},
 			},
 
@@ -1150,37 +2206,185 @@ func (b *SystemBackend) leasePaths() []*framework.Path {
 		{
 			Pattern: "leases/tidy$",
 
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.UpdateOperation: b.handleTidyLeases,
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: b.handleTidyLeases,
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+							Fields:      map[string]*framework.FieldSchema{},
+						}},
+					},
+				},
 			},
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["tidy_leases"][0]),
 			HelpDescription: strings.TrimSpace(sysHelp["tidy_leases"][1]),
 		},
+
+		{
+			Pattern: "leases/count$",
+			Fields: map[string]*framework.FieldSchema{
+				"type": {
+					Type:        framework.TypeString,
+					Required:    true,
+					Description: "Type of leases to get counts for (currently only supporting irrevocable).",
+				},
+				"include_child_namespaces": {
+					Type:        framework.TypeBool,
+					Default:     false,
+					Description: "Set true if you want counts for this namespace and its children.",
+				},
+			},
+
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					// currently only works for irrevocable leases with param: type=irrevocable
+					Callback: b.handleLeaseCount,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"lease_count": {
+									Type:        framework.TypeInt,
+									Description: "Number of matching leases",
+									Required:    true,
+								},
+								"counts": {
+									Type:        framework.TypeInt,
+									Description: "Number of matching leases per mount",
+									Required:    true,
+								},
+							},
+						}},
+					},
+				},
+			},
+
+			HelpSynopsis:    strings.TrimSpace(sysHelp["count-leases"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["count-leases"][1]),
+		},
+
+		{
+			Pattern: "leases$",
+			Fields: map[string]*framework.FieldSchema{
+				"type": {
+					Type:        framework.TypeString,
+					Required:    true,
+					Description: "Type of leases to retrieve (currently only supporting irrevocable).",
+				},
+				"include_child_namespaces": {
+					Type:        framework.TypeBool,
+					Default:     false,
+					Description: "Set true if you want leases for this namespace and its children.",
+				},
+				"limit": {
+					Type:        framework.TypeString,
+					Default:     "",
+					Description: "Set to a positive integer of the maximum number of entries to return. If you want all results, set to 'none'. If not set, you will get a maximum of 10,000 results returned.",
+				},
+			},
+
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					// currently only works for irrevocable leases with param: type=irrevocable
+					Callback: b.handleLeaseList,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"lease_count": {
+									Type:        framework.TypeInt,
+									Description: "Number of matching leases",
+									Required:    true,
+								},
+								"counts": {
+									Type:        framework.TypeInt,
+									Description: "Number of matching leases per mount",
+									Required:    true,
+								},
+							},
+						}},
+					},
+				},
+			},
+
+			HelpSynopsis:    strings.TrimSpace(sysHelp["list-leases"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["list-leases"][1]),
+		},
 	}
 }
 
-func (b *SystemBackend) remountPath() *framework.Path {
-	return &framework.Path{
-		Pattern: "remount",
+func (b *SystemBackend) remountPaths() []*framework.Path {
+	return []*framework.Path{
+		{
+			Pattern: "remount",
 
-		Fields: map[string]*framework.FieldSchema{
-			"from": &framework.FieldSchema{
-				Type:        framework.TypeString,
-				Description: "The previous mount point.",
+			Fields: map[string]*framework.FieldSchema{
+				"from": {
+					Type:        framework.TypeString,
+					Description: "The previous mount point.",
+				},
+				"to": {
+					Type:        framework.TypeString,
+					Description: "The new mount point.",
+				},
 			},
-			"to": &framework.FieldSchema{
-				Type:        framework.TypeString,
-				Description: "The new mount point.",
+
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: b.handleRemount,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"migration_id": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+							},
+						}},
+					},
+					Summary: "Initiate a mount migration",
+				},
 			},
+			HelpSynopsis:    strings.TrimSpace(sysHelp["remount"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["remount"][1]),
 		},
+		{
+			Pattern: "remount/status/(?P<migration_id>.+?)$",
 
-		Callbacks: map[logical.Operation]framework.OperationFunc{
-			logical.UpdateOperation: b.handleRemount,
+			Fields: map[string]*framework.FieldSchema{
+				"migration_id": {
+					Type:        framework.TypeString,
+					Description: "The ID of the migration operation",
+				},
+			},
+
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleRemountStatusCheck,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"migration_id": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"migration_info": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+							},
+						}},
+					},
+					Summary: "Check status of a mount migration",
+				},
+			},
+			HelpSynopsis:    strings.TrimSpace(sysHelp["remount-status"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["remount-status"][1]),
 		},
-
-		HelpSynopsis:    strings.TrimSpace(sysHelp["remount"][0]),
-		HelpDescription: strings.TrimSpace(sysHelp["remount"][1]),
 	}
 }
 
@@ -1188,38 +2392,69 @@ func (b *SystemBackend) metricsPath() *framework.Path {
 	return &framework.Path{
 		Pattern: "metrics",
 		Fields: map[string]*framework.FieldSchema{
-			"format": &framework.FieldSchema{
+			"format": {
 				Type:        framework.TypeString,
 				Description: "Format to export metrics into. Currently accepts only \"prometheus\".",
 				Query:       true,
 			},
 		},
-		Callbacks: map[logical.Operation]framework.OperationFunc{
-			logical.ReadOperation: b.handleMetrics,
+		Operations: map[logical.Operation]framework.OperationHandler{
+			logical.ReadOperation: &framework.PathOperation{
+				Callback: b.handleMetrics,
+				Responses: map[int][]framework.Response{
+					http.StatusOK: {{
+						Description: "OK",
+					}},
+				},
+			},
 		},
 		HelpSynopsis:    strings.TrimSpace(sysHelp["metrics"][0]),
 		HelpDescription: strings.TrimSpace(sysHelp["metrics"][1]),
 	}
-
 }
 
 func (b *SystemBackend) monitorPath() *framework.Path {
 	return &framework.Path{
 		Pattern: "monitor",
 		Fields: map[string]*framework.FieldSchema{
-			"log_level": &framework.FieldSchema{
+			"log_level": {
 				Type:        framework.TypeString,
 				Description: "Log level to view system logs at. Currently supported values are \"trace\", \"debug\", \"info\", \"warn\", \"error\".",
 				Query:       true,
 			},
+			"log_format": {
+				Type:        framework.TypeString,
+				Description: "Output format of logs. Supported values are \"standard\" and \"json\". The default is \"standard\".",
+				Query:       true,
+				Default:     "standard",
+			},
 		},
-		Callbacks: map[logical.Operation]framework.OperationFunc{
-			logical.ReadOperation: b.handleMonitor,
+		Operations: map[logical.Operation]framework.OperationHandler{
+			logical.ReadOperation: &framework.PathOperation{
+				Callback: b.handleMonitor,
+				Responses: map[int][]framework.Response{
+					http.StatusOK: {{
+						Description: "OK",
+					}},
+				},
+			},
 		},
 		HelpSynopsis:    strings.TrimSpace(sysHelp["monitor"][0]),
 		HelpDescription: strings.TrimSpace(sysHelp["monitor"][1]),
 	}
+}
 
+func (b *SystemBackend) inFlightRequestPath() *framework.Path {
+	return &framework.Path{
+		Pattern: "in-flight-req",
+		Operations: map[logical.Operation]framework.OperationHandler{
+			logical.ReadOperation: &framework.PathOperation{
+				Callback:    b.handleInFlightRequestData,
+				Summary:     strings.TrimSpace(sysHelp["in-flight-req"][0]),
+				Description: strings.TrimSpace(sysHelp["in-flight-req"][1]),
+			},
+		},
+	}
 }
 
 func (b *SystemBackend) hostInfoPath() *framework.Path {
@@ -1241,8 +2476,17 @@ func (b *SystemBackend) authPaths() []*framework.Path {
 	return []*framework.Path{
 		{
 			Pattern: "auth$",
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.ReadOperation: b.handleAuthTable,
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleAuthTable,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							// response keys are dynamic
+							Fields: nil,
+						}},
+					},
+				},
 			},
 			HelpSynopsis:    strings.TrimSpace(sysHelp["auth-table"][0]),
 			HelpDescription: strings.TrimSpace(sysHelp["auth-table"][1]),
@@ -1250,49 +2494,57 @@ func (b *SystemBackend) authPaths() []*framework.Path {
 		{
 			Pattern: "auth/(?P<path>.+?)/tune$",
 			Fields: map[string]*framework.FieldSchema{
-				"path": &framework.FieldSchema{
+				"path": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["auth_tune"][0]),
 				},
-				"default_lease_ttl": &framework.FieldSchema{
+				"default_lease_ttl": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["tune_default_lease_ttl"][0]),
 				},
-				"max_lease_ttl": &framework.FieldSchema{
+				"max_lease_ttl": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["tune_max_lease_ttl"][0]),
 				},
-				"description": &framework.FieldSchema{
+				"description": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["auth_desc"][0]),
 				},
-				"audit_non_hmac_request_keys": &framework.FieldSchema{
+				"audit_non_hmac_request_keys": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: strings.TrimSpace(sysHelp["tune_audit_non_hmac_request_keys"][0]),
 				},
-				"audit_non_hmac_response_keys": &framework.FieldSchema{
+				"audit_non_hmac_response_keys": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: strings.TrimSpace(sysHelp["tune_audit_non_hmac_response_keys"][0]),
 				},
-				"options": &framework.FieldSchema{
+				"options": {
 					Type:        framework.TypeKVPairs,
 					Description: strings.TrimSpace(sysHelp["tune_mount_options"][0]),
 				},
-				"listing_visibility": &framework.FieldSchema{
+				"listing_visibility": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["listing_visibility"][0]),
 				},
-				"passthrough_request_headers": &framework.FieldSchema{
+				"passthrough_request_headers": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: strings.TrimSpace(sysHelp["passthrough_request_headers"][0]),
 				},
-				"allowed_response_headers": &framework.FieldSchema{
+				"allowed_response_headers": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: strings.TrimSpace(sysHelp["allowed_response_headers"][0]),
 				},
-				"token_type": &framework.FieldSchema{
+				"token_type": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["token_type"][0]),
+				},
+				"user_lockout_config": {
+					Type:        framework.TypeMap,
+					Description: strings.TrimSpace(sysHelp["tune_user_lockout_config"][0]),
+				},
+				"plugin_version": {
+					Type:        framework.TypeString,
+					Description: strings.TrimSpace(sysHelp["plugin-catalog_version"][0]),
 				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
@@ -1300,11 +2552,95 @@ func (b *SystemBackend) authPaths() []*framework.Path {
 					Callback:    b.handleAuthTuneRead,
 					Summary:     "Reads the given auth path's configuration.",
 					Description: "This endpoint requires sudo capability on the final path, but the same functionality can be achieved without sudo via `sys/mounts/auth/[auth-path]/tune`.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"description": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"default_lease_ttl": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"max_lease_ttl": {
+									Type:     framework.TypeInt,
+									Required: true,
+								},
+								"force_no_cache": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"external_entropy_access": {
+									Type:     framework.TypeBool,
+									Required: false,
+								},
+								"token_type": {
+									Type:     framework.TypeString,
+									Required: false,
+								},
+								"audit_non_hmac_request_keys": {
+									Type:     framework.TypeCommaStringSlice,
+									Required: false,
+								},
+								"audit_non_hmac_response_keys": {
+									Type:     framework.TypeCommaStringSlice,
+									Required: false,
+								},
+								"listing_visibility": {
+									Type:     framework.TypeString,
+									Required: false,
+								},
+								"passthrough_request_headers": {
+									Type:     framework.TypeCommaStringSlice,
+									Required: false,
+								},
+								"allowed_response_headers": {
+									Type:     framework.TypeCommaStringSlice,
+									Required: false,
+								},
+								"allowed_managed_keys": {
+									Type:     framework.TypeCommaStringSlice,
+									Required: false,
+								},
+								"user_lockout_counter_reset_duration": {
+									Type:     framework.TypeInt64,
+									Required: false,
+								},
+								"user_lockout_threshold": {
+									Type:     framework.TypeInt64, // uint64
+									Required: false,
+								},
+								"user_lockout_duration": {
+									Type:     framework.TypeInt64,
+									Required: false,
+								},
+								"user_lockout_disable": {
+									Type:     framework.TypeBool,
+									Required: false,
+								},
+								"options": {
+									Type:     framework.TypeMap,
+									Required: false,
+								},
+								"plugin_version": {
+									Type:     framework.TypeString,
+									Required: false,
+								},
+							},
+						}},
+					},
 				},
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback:    b.handleAuthTuneWrite,
 					Summary:     "Tune configuration parameters for a given auth path.",
 					Description: "This endpoint requires sudo capability on the final path, but the same functionality can be achieved without sudo via `sys/mounts/auth/[auth-path]/tune`.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 			},
 			HelpSynopsis:    strings.TrimSpace(sysHelp["auth_tune"][0]),
@@ -1313,57 +2649,134 @@ func (b *SystemBackend) authPaths() []*framework.Path {
 		{
 			Pattern: "auth/(?P<path>.+)",
 			Fields: map[string]*framework.FieldSchema{
-				"path": &framework.FieldSchema{
+				"path": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["auth_path"][0]),
 				},
-				"type": &framework.FieldSchema{
+				"type": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["auth_type"][0]),
 				},
-				"description": &framework.FieldSchema{
+				"description": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["auth_desc"][0]),
 				},
-				"config": &framework.FieldSchema{
+				"config": {
 					Type:        framework.TypeMap,
 					Description: strings.TrimSpace(sysHelp["auth_config"][0]),
 				},
-				"local": &framework.FieldSchema{
+				"local": {
 					Type:        framework.TypeBool,
 					Default:     false,
 					Description: strings.TrimSpace(sysHelp["mount_local"][0]),
 				},
-				"seal_wrap": &framework.FieldSchema{
+				"seal_wrap": {
 					Type:        framework.TypeBool,
 					Default:     false,
 					Description: strings.TrimSpace(sysHelp["seal_wrap"][0]),
 				},
-				"external_entropy_access": &framework.FieldSchema{
+				"external_entropy_access": {
 					Type:        framework.TypeBool,
 					Default:     false,
 					Description: strings.TrimSpace(sysHelp["external_entropy_access"][0]),
 				},
-				"plugin_name": &framework.FieldSchema{
+				"plugin_name": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["auth_plugin"][0]),
 				},
-				"options": &framework.FieldSchema{
+				"options": {
 					Type:        framework.TypeKVPairs,
 					Description: strings.TrimSpace(sysHelp["auth_options"][0]),
 				},
+				"plugin_version": {
+					Type:        framework.TypeString,
+					Description: strings.TrimSpace(sysHelp["plugin-catalog_version"][0]),
+				},
 			},
 			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleReadAuth,
+					Summary:  "Read the configuration of the auth engine at the given path.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"type": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"description": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"accessor": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"local": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"seal_wrap": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"external_entropy_access": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"options": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+								"uuid": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"plugin_version": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"running_plugin_version": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"running_sha256": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"deprecation_status": {
+									Type:     framework.TypeString,
+									Required: false,
+								},
+								"config": {
+									Type:     framework.TypeMap,
+									Required: true,
+								},
+							},
+						}},
+					},
+				},
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handleEnableAuth,
 					Summary:  "Enables a new auth method.",
 					Description: `After enabling, the auth method can be accessed and configured via the auth path specified as part of the URL. This auth path will be nested under the auth prefix.
 
 For example, enable the "foo" auth method will make it accessible at /auth/foo.`,
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 				logical.DeleteOperation: &framework.PathOperation{
 					Callback: b.handleDisableAuth,
 					Summary:  "Disable the auth method at the given auth path",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
 				},
 			},
 			HelpSynopsis:    strings.TrimSpace(sysHelp["auth"][0]),
@@ -1377,9 +2790,41 @@ func (b *SystemBackend) policyPaths() []*framework.Path {
 		{
 			Pattern: "policy/?$",
 
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.ReadOperation: b.handlePoliciesList(PolicyTypeACL),
-				logical.ListOperation: b.handlePoliciesList(PolicyTypeACL),
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handlePoliciesList(PolicyTypeACL),
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"keys": {
+									Type:     framework.TypeStringSlice,
+									Required: true,
+								},
+								"policies": {
+									Type: framework.TypeStringSlice,
+								},
+							},
+						}},
+					},
+				},
+				logical.ListOperation: &framework.PathOperation{
+					Callback: b.handlePoliciesList(PolicyTypeACL),
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"keys": {
+									Type:     framework.TypeStringSlice,
+									Required: true,
+								},
+								"policies": {
+									Type: framework.TypeStringSlice,
+								},
+							},
+						}},
+					},
+				},
 			},
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["policy-list"][0]),
@@ -1390,16 +2835,16 @@ func (b *SystemBackend) policyPaths() []*framework.Path {
 			Pattern: "policy/(?P<name>.+)",
 
 			Fields: map[string]*framework.FieldSchema{
-				"name": &framework.FieldSchema{
+				"name": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["policy-name"][0]),
 				},
-				"rules": &framework.FieldSchema{
+				"rules": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["policy-rules"][0]),
 					Deprecated:  true,
 				},
-				"policy": &framework.FieldSchema{
+				"policy": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["policy-rules"][0]),
 				},
@@ -1408,15 +2853,46 @@ func (b *SystemBackend) policyPaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
 					Callback: b.handlePoliciesRead(PolicyTypeACL),
-					Summary:  "Retrieve the policy body for the named policy.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"name": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"rules": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"policy": {
+									Type:     framework.TypeString,
+									Required: false,
+								},
+							},
+						}},
+					},
+					Summary: "Retrieve the policy body for the named policy.",
 				},
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handlePoliciesSet(PolicyTypeACL),
-					Summary:  "Add a new or update an existing policy.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+							Fields:      map[string]*framework.FieldSchema{},
+						}},
+					},
+					Summary: "Add a new or update an existing policy.",
 				},
 				logical.DeleteOperation: &framework.PathOperation{
 					Callback: b.handlePoliciesDelete(PolicyTypeACL),
-					Summary:  "Delete the policy with the given name.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+							Fields:      map[string]*framework.FieldSchema{},
+						}},
+					},
+					Summary: "Delete the policy with the given name.",
 				},
 			},
 
@@ -1427,8 +2903,24 @@ func (b *SystemBackend) policyPaths() []*framework.Path {
 		{
 			Pattern: "policies/acl/?$",
 
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.ListOperation: b.handlePoliciesList(PolicyTypeACL),
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ListOperation: &framework.PathOperation{
+					Callback: b.handlePoliciesList(PolicyTypeACL),
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"keys": {
+									Type:     framework.TypeStringSlice,
+									Required: true,
+								},
+								"policies": {
+									Type: framework.TypeStringSlice,
+								},
+							},
+						}},
+					},
+				},
 			},
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["policy-list"][0]),
@@ -1439,11 +2931,11 @@ func (b *SystemBackend) policyPaths() []*framework.Path {
 			Pattern: "policies/acl/(?P<name>.+)",
 
 			Fields: map[string]*framework.FieldSchema{
-				"name": &framework.FieldSchema{
+				"name": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["policy-name"][0]),
 				},
-				"policy": &framework.FieldSchema{
+				"policy": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["policy-rules"][0]),
 				},
@@ -1452,15 +2944,46 @@ func (b *SystemBackend) policyPaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
 					Callback: b.handlePoliciesRead(PolicyTypeACL),
-					Summary:  "Retrieve information about the named ACL policy.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"name": {
+									Type:     framework.TypeString,
+									Required: false,
+								},
+								"rules": {
+									Type:     framework.TypeString,
+									Required: false,
+								},
+								"policy": {
+									Type:     framework.TypeString,
+									Required: false,
+								},
+							},
+						}},
+					},
+					Summary: "Retrieve information about the named ACL policy.",
 				},
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handlePoliciesSet(PolicyTypeACL),
-					Summary:  "Add a new or update an existing ACL policy.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+							Fields:      map[string]*framework.FieldSchema{},
+						}},
+					},
+					Summary: "Add a new or update an existing ACL policy.",
 				},
 				logical.DeleteOperation: &framework.PathOperation{
 					Callback: b.handlePoliciesDelete(PolicyTypeACL),
-					Summary:  "Delete the ACL policy with the given name.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+							Fields:      map[string]*framework.FieldSchema{},
+						}},
+					},
+					Summary: "Delete the ACL policy with the given name.",
 				},
 			},
 
@@ -1469,10 +2992,32 @@ func (b *SystemBackend) policyPaths() []*framework.Path {
 		},
 
 		{
+			Pattern: "policies/password/?$",
+
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ListOperation: &framework.PathOperation{
+					Callback: b.handlePoliciesPasswordList,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"keys": {
+									Type:     framework.TypeStringSlice,
+									Required: false,
+								},
+							},
+						}},
+					},
+					Summary: "List the existing password policies.",
+				},
+			},
+		},
+
+		{
 			Pattern: "policies/password/(?P<name>.+)/generate$",
 
 			Fields: map[string]*framework.FieldSchema{
-				"name": &framework.FieldSchema{
+				"name": {
 					Type:        framework.TypeString,
 					Description: "The name of the password policy.",
 				},
@@ -1481,7 +3026,18 @@ func (b *SystemBackend) policyPaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.ReadOperation: &framework.PathOperation{
 					Callback: b.handlePoliciesPasswordGenerate,
-					Summary:  "Generate a password from an existing password policy.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"password": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+							},
+						}},
+					},
+					Summary: "Generate a password from an existing password policy.",
 				},
 			},
 
@@ -1493,11 +3049,11 @@ func (b *SystemBackend) policyPaths() []*framework.Path {
 			Pattern: "policies/password/(?P<name>.+)$",
 
 			Fields: map[string]*framework.FieldSchema{
-				"name": &framework.FieldSchema{
+				"name": {
 					Type:        framework.TypeString,
 					Description: "The name of the password policy.",
 				},
-				"policy": &framework.FieldSchema{
+				"policy": {
 					Type:        framework.TypeString,
 					Description: "The password policy",
 				},
@@ -1506,15 +3062,38 @@ func (b *SystemBackend) policyPaths() []*framework.Path {
 			Operations: map[logical.Operation]framework.OperationHandler{
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handlePoliciesPasswordSet,
-					Summary:  "Add a new or update an existing password policy.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+							Fields:      map[string]*framework.FieldSchema{},
+						}},
+					},
+					Summary: "Add a new or update an existing password policy.",
 				},
 				logical.ReadOperation: &framework.PathOperation{
 					Callback: b.handlePoliciesPasswordGet,
-					Summary:  "Retrieve an existing password policy.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"policy": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+							},
+						}},
+					},
+					Summary: "Retrieve an existing password policy.",
 				},
 				logical.DeleteOperation: &framework.PathOperation{
 					Callback: b.handlePoliciesPasswordDelete,
-					Summary:  "Delete a password policy.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+							Fields:      map[string]*framework.FieldSchema{},
+						}},
+					},
+					Summary: "Delete a password policy.",
 				},
 			},
 
@@ -1536,13 +3115,15 @@ func (b *SystemBackend) wrappingPaths() []*framework.Path {
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["wrap"][0]),
 			HelpDescription: strings.TrimSpace(sysHelp["wrap"][1]),
+
+			TakesArbitraryInput: true,
 		},
 
 		{
 			Pattern: "wrapping/unwrap$",
 
 			Fields: map[string]*framework.FieldSchema{
-				"token": &framework.FieldSchema{
+				"token": {
 					Type: framework.TypeString,
 				},
 			},
@@ -1559,7 +3140,7 @@ func (b *SystemBackend) wrappingPaths() []*framework.Path {
 			Pattern: "wrapping/lookup$",
 
 			Fields: map[string]*framework.FieldSchema{
-				"token": &framework.FieldSchema{
+				"token": {
 					Type: framework.TypeString,
 				},
 			},
@@ -1583,7 +3164,7 @@ func (b *SystemBackend) wrappingPaths() []*framework.Path {
 			Pattern: "wrapping/rewrap$",
 
 			Fields: map[string]*framework.FieldSchema{
-				"token": &framework.FieldSchema{
+				"token": {
 					Type: framework.TypeString,
 				},
 			},
@@ -1604,55 +3185,163 @@ func (b *SystemBackend) mountPaths() []*framework.Path {
 			Pattern: "mounts/(?P<path>.+?)/tune$",
 
 			Fields: map[string]*framework.FieldSchema{
-				"path": &framework.FieldSchema{
+				"path": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["mount_path"][0]),
 				},
-				"default_lease_ttl": &framework.FieldSchema{
+				"default_lease_ttl": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["tune_default_lease_ttl"][0]),
 				},
-				"max_lease_ttl": &framework.FieldSchema{
+				"max_lease_ttl": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["tune_max_lease_ttl"][0]),
 				},
-				"description": &framework.FieldSchema{
+				"description": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["auth_desc"][0]),
 				},
-				"audit_non_hmac_request_keys": &framework.FieldSchema{
+				"audit_non_hmac_request_keys": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: strings.TrimSpace(sysHelp["tune_audit_non_hmac_request_keys"][0]),
 				},
-				"audit_non_hmac_response_keys": &framework.FieldSchema{
+				"audit_non_hmac_response_keys": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: strings.TrimSpace(sysHelp["tune_audit_non_hmac_response_keys"][0]),
 				},
-				"options": &framework.FieldSchema{
+				"options": {
 					Type:        framework.TypeKVPairs,
 					Description: strings.TrimSpace(sysHelp["tune_mount_options"][0]),
 				},
-				"listing_visibility": &framework.FieldSchema{
+				"listing_visibility": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["listing_visibility"][0]),
 				},
-				"passthrough_request_headers": &framework.FieldSchema{
+				"passthrough_request_headers": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: strings.TrimSpace(sysHelp["passthrough_request_headers"][0]),
 				},
-				"allowed_response_headers": &framework.FieldSchema{
+				"allowed_response_headers": {
 					Type:        framework.TypeCommaStringSlice,
 					Description: strings.TrimSpace(sysHelp["allowed_response_headers"][0]),
 				},
-				"token_type": &framework.FieldSchema{
+				"token_type": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["token_type"][0]),
 				},
+				"allowed_managed_keys": {
+					Type:        framework.TypeCommaStringSlice,
+					Description: strings.TrimSpace(sysHelp["tune_allowed_managed_keys"][0]),
+				},
+				"plugin_version": {
+					Type:        framework.TypeString,
+					Description: strings.TrimSpace(sysHelp["plugin-catalog_version"][0]),
+				},
+				"user_lockout_config": {
+					Type:        framework.TypeMap,
+					Description: strings.TrimSpace(sysHelp["tune_user_lockout_config"][0]),
+				},
 			},
 
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.ReadOperation:   b.handleMountTuneRead,
-				logical.UpdateOperation: b.handleMountTuneWrite,
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleMountTuneRead,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"max_lease_ttl": {
+									Type:        framework.TypeInt,
+									Description: strings.TrimSpace(sysHelp["tune_max_lease_ttl"][0]),
+									Required:    true,
+								},
+								"description": {
+									Type:        framework.TypeString,
+									Description: strings.TrimSpace(sysHelp["auth_desc"][0]),
+									Required:    true,
+								},
+								"default_lease_ttl": {
+									Type:        framework.TypeInt,
+									Description: strings.TrimSpace(sysHelp["tune_default_lease_ttl"][0]),
+									Required:    true,
+								},
+								"force_no_cache": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"token_type": {
+									Type:        framework.TypeString,
+									Description: strings.TrimSpace(sysHelp["token_type"][0]),
+									Required:    false,
+								},
+								"allowed_managed_keys": {
+									Type:        framework.TypeCommaStringSlice,
+									Description: strings.TrimSpace(sysHelp["tune_allowed_managed_keys"][0]),
+									Required:    false,
+								},
+								"allowed_response_headers": {
+									Type:        framework.TypeCommaStringSlice,
+									Description: strings.TrimSpace(sysHelp["allowed_response_headers"][0]),
+									Required:    false,
+								},
+								"options": {
+									Type:        framework.TypeKVPairs,
+									Description: strings.TrimSpace(sysHelp["tune_mount_options"][0]),
+									Required:    false,
+								},
+								"plugin_version": {
+									Type:        framework.TypeString,
+									Description: strings.TrimSpace(sysHelp["plugin-catalog_version"][0]),
+									Required:    false,
+								},
+								"external_entropy_access": {
+									Type:     framework.TypeBool,
+									Required: false,
+								},
+								"audit_non_hmac_request_keys": {
+									Type:     framework.TypeCommaStringSlice,
+									Required: false,
+								},
+								"audit_non_hmac_response_keys": {
+									Type:     framework.TypeCommaStringSlice,
+									Required: false,
+								},
+								"listing_visibility": {
+									Type:     framework.TypeString,
+									Required: false,
+								},
+								"passthrough_request_headers": {
+									Type:     framework.TypeCommaStringSlice,
+									Required: false,
+								},
+								"user_lockout_counter_reset_duration": {
+									Type:     framework.TypeInt64,
+									Required: false,
+								},
+								"user_lockout_threshold": {
+									Type:     framework.TypeInt64, // TODO this is actuall a Uint64 do we need a new type?
+									Required: false,
+								},
+								"user_lockout_duration": {
+									Type:     framework.TypeInt64,
+									Required: false,
+								},
+								"user_lockout_disable": {
+									Type:     framework.TypeBool,
+									Required: false,
+								},
+							},
+						}},
+					},
+				},
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: b.handleMountTuneWrite,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+						}},
+					},
+				},
 			},
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["mount_tune"][0]),
@@ -1663,55 +3352,141 @@ func (b *SystemBackend) mountPaths() []*framework.Path {
 			Pattern: "mounts/(?P<path>.+?)",
 
 			Fields: map[string]*framework.FieldSchema{
-				"path": &framework.FieldSchema{
+				"path": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["mount_path"][0]),
 				},
-				"type": &framework.FieldSchema{
+				"type": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["mount_type"][0]),
 				},
-				"description": &framework.FieldSchema{
+				"description": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["mount_desc"][0]),
 				},
-				"config": &framework.FieldSchema{
+				"config": {
 					Type:        framework.TypeMap,
 					Description: strings.TrimSpace(sysHelp["mount_config"][0]),
 				},
-				"local": &framework.FieldSchema{
+				"local": {
 					Type:        framework.TypeBool,
 					Default:     false,
 					Description: strings.TrimSpace(sysHelp["mount_local"][0]),
 				},
-				"seal_wrap": &framework.FieldSchema{
+				"seal_wrap": {
 					Type:        framework.TypeBool,
 					Default:     false,
 					Description: strings.TrimSpace(sysHelp["seal_wrap"][0]),
 				},
-				"external_entropy_access": &framework.FieldSchema{
+				"external_entropy_access": {
 					Type:        framework.TypeBool,
 					Default:     false,
 					Description: strings.TrimSpace(sysHelp["external_entropy_access"][0]),
 				},
-				"plugin_name": &framework.FieldSchema{
+				"plugin_name": {
 					Type:        framework.TypeString,
 					Description: strings.TrimSpace(sysHelp["mount_plugin_name"][0]),
 				},
-				"options": &framework.FieldSchema{
+				"options": {
 					Type:        framework.TypeKVPairs,
 					Description: strings.TrimSpace(sysHelp["mount_options"][0]),
+				},
+				"plugin_version": {
+					Type:        framework.TypeString,
+					Description: strings.TrimSpace(sysHelp["plugin-catalog_version"][0]),
 				},
 			},
 
 			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleReadMount,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields: map[string]*framework.FieldSchema{
+								"type": {
+									Type:        framework.TypeString,
+									Description: strings.TrimSpace(sysHelp["mount_type"][0]),
+									Required:    true,
+								},
+								"description": {
+									Type:        framework.TypeString,
+									Description: strings.TrimSpace(sysHelp["mount_desc"][0]),
+									Required:    true,
+								},
+								"accessor": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"local": {
+									Type:        framework.TypeBool,
+									Default:     false,
+									Description: strings.TrimSpace(sysHelp["mount_local"][0]),
+									Required:    true,
+								},
+								"seal_wrap": {
+									Type:        framework.TypeBool,
+									Default:     false,
+									Description: strings.TrimSpace(sysHelp["seal_wrap"][0]),
+									Required:    true,
+								},
+								"external_entropy_access": {
+									Type:     framework.TypeBool,
+									Required: true,
+								},
+								"options": {
+									Type:        framework.TypeKVPairs,
+									Description: strings.TrimSpace(sysHelp["mount_options"][0]),
+									Required:    true,
+								},
+								"plugin_version": {
+									Type:        framework.TypeString,
+									Description: strings.TrimSpace(sysHelp["plugin-catalog_version"][0]),
+									Required:    true,
+								},
+								"uuid": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"running_plugin_version": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"running_sha256": {
+									Type:     framework.TypeString,
+									Required: true,
+								},
+								"config": {
+									Type:        framework.TypeMap,
+									Description: strings.TrimSpace(sysHelp["mount_config"][0]),
+									Required:    true,
+								},
+								"deprecation_status": {
+									Type:     framework.TypeString,
+									Required: false,
+								},
+							},
+						}},
+					},
+					Summary: "Read the configuration of the secret engine at the given path.",
+				},
 				logical.UpdateOperation: &framework.PathOperation{
 					Callback: b.handleMount,
-					Summary:  "Enable a new secrets engine at the given path.",
+					Responses: map[int][]framework.Response{
+						http.StatusNoContent: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Enable a new secrets engine at the given path.",
 				},
 				logical.DeleteOperation: &framework.PathOperation{
 					Callback: b.handleUnmount,
-					Summary:  "Disable the mount point specified at the given path.",
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+						}},
+					},
+					Summary: "Disable the mount point specified at the given path.",
 				},
 			},
 			HelpSynopsis:    strings.TrimSpace(sysHelp["mount"][0]),
@@ -1721,12 +3496,79 @@ func (b *SystemBackend) mountPaths() []*framework.Path {
 		{
 			Pattern: "mounts$",
 
-			Callbacks: map[logical.Operation]framework.OperationFunc{
-				logical.ReadOperation: b.handleMountTable,
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleMountTable,
+					Responses: map[int][]framework.Response{
+						http.StatusOK: {{
+							Description: "OK",
+							Fields:      map[string]*framework.FieldSchema{},
+						}},
+					},
+				},
 			},
 
 			HelpSynopsis:    strings.TrimSpace(sysHelp["mounts"][0]),
 			HelpDescription: strings.TrimSpace(sysHelp["mounts"][1]),
+		},
+	}
+}
+
+func (b *SystemBackend) experimentPaths() []*framework.Path {
+	return []*framework.Path{
+		{
+			Pattern: "experiments$",
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleReadExperiments,
+					Summary:  "Returns the available and enabled experiments",
+				},
+			},
+			HelpSynopsis:    strings.TrimSpace(sysHelp["experiments"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["experiments"][1]),
+		},
+	}
+}
+
+func (b *SystemBackend) lockedUserPaths() []*framework.Path {
+	return []*framework.Path{
+		{
+			Pattern: "locked-users/(?P<mount_accessor>.+?)/unlock/(?P<alias_identifier>.+)",
+			Fields: map[string]*framework.FieldSchema{
+				"mount_accessor": {
+					Type:        framework.TypeString,
+					Description: strings.TrimSpace(sysHelp["mount_accessor"][0]),
+				},
+				"alias_identifier": {
+					Type:        framework.TypeString,
+					Description: strings.TrimSpace(sysHelp["alias_identifier"][0]),
+				},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.UpdateOperation: &framework.PathOperation{
+					Callback: b.handleUnlockUser,
+					Summary:  "Unlocks the user with given mount_accessor and alias_identifier",
+				},
+			},
+			HelpSynopsis:    strings.TrimSpace(sysHelp["unlock_user"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["unlock_user"][1]),
+		},
+		{
+			Pattern: "locked-users",
+			Fields: map[string]*framework.FieldSchema{
+				"mount_accessor": {
+					Type:        framework.TypeString,
+					Description: strings.TrimSpace(sysHelp["mount_accessor"][0]),
+				},
+			},
+			Operations: map[logical.Operation]framework.OperationHandler{
+				logical.ReadOperation: &framework.PathOperation{
+					Callback: b.handleLockedUsersMetricQuery,
+					Summary:  "Report the locked user count metrics, for this namespace and all child namespaces.",
+				},
+			},
+			HelpSynopsis:    strings.TrimSpace(sysHelp["locked_users"][0]),
+			HelpDescription: strings.TrimSpace(sysHelp["locked_users"][1]),
 		},
 	}
 }

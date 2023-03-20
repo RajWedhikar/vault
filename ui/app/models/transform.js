@@ -1,10 +1,13 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+import Model, { attr } from '@ember-data/model';
 import { computed } from '@ember/object';
-import DS from 'ember-data';
 import { apiPath } from 'vault/macros/lazy-capabilities';
 import { expandAttributeMeta } from 'vault/utils/field-to-attrs';
 import attachCapabilities from 'vault/lib/attach-capabilities';
-
-const { attr } = DS;
 
 // these arrays define the order in which the fields will be displayed
 // see
@@ -35,12 +38,10 @@ const TWEAK_SOURCE = [
   },
 ];
 
-const Model = DS.Model.extend({
-  useOpenAPI: false,
+const ModelExport = Model.extend({
   name: attr('string', {
-    // TODO: make this required for making a transformation
+    // CBS TODO: make this required for making a transformation
     label: 'Name',
-    fieldValue: 'id',
     readOnly: true,
     subText: 'The name for your transformation. This cannot be edited later.',
   }),
@@ -55,7 +56,7 @@ const Model = DS.Model.extend({
     defaultValue: 'supplied',
     label: 'Tweak source',
     possibleValues: TWEAK_SOURCE,
-    subText: `A tweak value is used when performing FPE transformations. This can be supplied, generated, or internal.`, // TODO: I do not include the link here.  Need to figure out the best way to approach this.
+    subText: `A tweak value is used when performing FPE transformations. This can be supplied, generated, or internal.`, // CBS TODO: I do not include the link here.  Need to figure out the best way to approach this.
   }),
   masking_character: attr('string', {
     characterLimit: 1,
@@ -65,34 +66,39 @@ const Model = DS.Model.extend({
   }),
   template: attr('array', {
     editType: 'searchSelect',
+    isSectionHeader: true,
     fallbackComponent: 'string-list',
-    label: 'Template', // TODO: make this required for making a transformation
+    label: 'Template', // CBS TODO: make this required for making a transformation
     models: ['transform/template'],
     selectLimit: 1,
-    subLabel: 'Template Name',
+    onlyAllowExisting: true,
     subText:
       'Templates allow Vault to determine what and how to capture the value to be transformed. Type to use an existing template or create a new one.',
   }),
   allowed_roles: attr('array', {
     editType: 'searchSelect',
+    isSectionHeader: true,
     label: 'Allowed roles',
     fallbackComponent: 'string-list',
     models: ['transform/role'],
     subText: 'Search for an existing role, type a new role to create it, or use a wildcard (*).',
     wildcardLabel: 'role',
   }),
-  transformAttrs: computed('type', function() {
+  transformAttrs: computed('type', function () {
     if (this.type === 'masking') {
       return ['name', 'type', 'masking_character', 'template', 'allowed_roles'];
     }
     return ['name', 'type', 'tweak_source', 'template', 'allowed_roles'];
   }),
-  transformFieldAttrs: computed('transformAttrs', function() {
-    return expandAttributeMeta(this, this.get('transformAttrs'));
+  transformFieldAttrs: computed('transformAttrs', function () {
+    return expandAttributeMeta(this, this.transformAttrs);
+  }),
+
+  backend: attr('string', {
+    readOnly: true,
   }),
 });
 
-export default attachCapabilities(Model, {
-  // TODO: Update to dynamic backend name
-  updatePath: apiPath`transform/transformation/${'id'}`,
+export default attachCapabilities(ModelExport, {
+  updatePath: apiPath`${'backend'}/transformation/${'id'}`,
 });

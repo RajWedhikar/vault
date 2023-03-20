@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package vault
 
 import (
@@ -10,6 +13,7 @@ import (
 	uuid "github.com/hashicorp/go-uuid"
 	"github.com/hashicorp/vault/audit"
 	"github.com/hashicorp/vault/helper/namespace"
+	"github.com/hashicorp/vault/sdk/helper/consts"
 	"github.com/hashicorp/vault/sdk/helper/jsonutil"
 	"github.com/hashicorp/vault/sdk/helper/salt"
 	"github.com/hashicorp/vault/sdk/logical"
@@ -34,10 +38,26 @@ const (
 	auditTableType = "audit"
 )
 
-var (
-	// loadAuditFailed if loading audit tables encounters an error
-	errLoadAuditFailed = errors.New("failed to setup audit table")
-)
+// loadAuditFailed if loading audit tables encounters an error
+var errLoadAuditFailed = errors.New("failed to setup audit table")
+
+func (c *Core) generateAuditTestProbe() (*logical.LogInput, error) {
+	requestId, err := uuid.GenerateUUID()
+	if err != nil {
+		return nil, err
+	}
+	return &logical.LogInput{
+		Type: "request",
+		Auth: nil,
+		Request: &logical.Request{
+			ID:        requestId,
+			Operation: "update",
+			Path:      "sys/audit/test",
+		},
+		Response: nil,
+		OuterErr: nil,
+	}, nil
+}
 
 // enableAudit is used to enable a new audit backend
 func (c *Core) enableAudit(ctx context.Context, entry *MountEntry, updateStorage bool) error {
@@ -100,6 +120,20 @@ func (c *Core) enableAudit(ctx context.Context, entry *MountEntry, updateStorage
 	}
 	if backend == nil {
 		return fmt.Errorf("nil audit backend of type %q returned from factory", entry.Type)
+	}
+
+	if entry.Options["skip_test"] != "true" {
+		// Test the new audit device and report failure if it doesn't work.
+		testProbe, err := c.generateAuditTestProbe()
+		if err != nil {
+			return err
+		}
+		err = backend.LogTestMessage(ctx, testProbe, entry.Options)
+		if err != nil {
+			c.logger.Error("new audit backend failed test", "path", entry.Path, "type", entry.Type, "error", err)
+			return fmt.Errorf("audit backend failed test message: %w", err)
+
+		}
 	}
 
 	newTable := c.audit.shallowClone()
@@ -281,13 +315,6 @@ func (c *Core) persistAudit(ctx context.Context, table *MountTable, localOnly bo
 		return fmt.Errorf("invalid table type given, not persisting")
 	}
 
-	for _, entry := range table.Entries {
-		if entry.Table != table.Type {
-			c.logger.Error("given entry to persist in audit table has wrong table value", "path", entry.Path, "entry_table_type", entry.Table, "actual_type", table.Type)
-			return fmt.Errorf("invalid audit entry found, not persisting")
-		}
-	}
-
 	nonLocalAudit := &MountTable{
 		Type: auditTableType,
 	}
@@ -297,6 +324,11 @@ func (c *Core) persistAudit(ctx context.Context, table *MountTable, localOnly bo
 	}
 
 	for _, entry := range table.Entries {
+		if entry.Table != table.Type {
+			c.logger.Error("given entry to persist in audit table has wrong table value", "path", entry.Path, "entry_table_type", entry.Table, "actual_type", table.Type)
+			return fmt.Errorf("invalid audit entry found, not persisting")
+		}
+
 		if entry.Local {
 			localAudit.Entries = append(localAudit.Entries, entry)
 		} else {
@@ -516,10 +548,16 @@ type basicAuditor struct {
 }
 
 func (b *basicAuditor) AuditRequest(ctx context.Context, input *logical.LogInput) error {
+	if b.c.auditBroker == nil {
+		return consts.ErrSealed
+	}
 	return b.c.auditBroker.LogRequest(ctx, input, b.c.auditedHeaders)
 }
 
 func (b *basicAuditor) AuditResponse(ctx context.Context, input *logical.LogInput) error {
+	if b.c.auditBroker == nil {
+		return consts.ErrSealed
+	}
 	return b.c.auditBroker.LogResponse(ctx, input, b.c.auditedHeaders)
 }
 

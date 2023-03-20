@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package cert
 
 import (
@@ -9,6 +12,7 @@ import (
 	"github.com/hashicorp/go-hclog"
 	"github.com/hashicorp/vault/api"
 	"github.com/hashicorp/vault/command/agent/auth"
+	"github.com/hashicorp/vault/sdk/helper/consts"
 )
 
 type certMethod struct {
@@ -108,7 +112,7 @@ func (c *certMethod) AuthClient(client *api.Client) (*api.Client, error) {
 	if c.caCert != "" || (c.clientKey != "" && c.clientCert != "") {
 		// Return cached client if present
 		if c.client != nil {
-			return client, nil
+			return c.client, nil
 		}
 
 		config := api.DefaultConfig()
@@ -132,6 +136,9 @@ func (c *certMethod) AuthClient(client *api.Client) (*api.Client, error) {
 		clientToAuth, err = api.NewClient(config)
 		if err != nil {
 			return nil, err
+		}
+		if ns := client.Headers().Get(consts.NamespaceHeaderName); ns != "" {
+			clientToAuth.SetNamespace(ns)
 		}
 
 		// Cache the client for future use

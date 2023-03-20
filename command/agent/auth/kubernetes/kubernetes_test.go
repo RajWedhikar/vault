@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package kubernetes
 
 import (
@@ -91,7 +94,6 @@ func TestKubernetesAuth_basic(t *testing.T) {
 			}
 		})
 	}
-
 }
 
 // jwt for default service account

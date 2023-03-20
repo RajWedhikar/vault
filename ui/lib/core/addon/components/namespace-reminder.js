@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 import { inject as service } from '@ember/service';
 import { not } from '@ember/object/computed';
 import Component from '@ember/component';
@@ -11,8 +16,8 @@ export default Component.extend({
   //public API
   noun: null,
   mode: 'edit',
-  modeVerb: computed(function() {
-    let mode = this.get('mode');
+  modeVerb: computed('mode', function () {
+    const mode = this.mode;
     if (!mode) {
       return '';
     }

@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 .page-header + .tabs-container {
   box-shadow: none;
 }
@@ -8,14 +13,31 @@
   ul {
     border-color: transparent;
     min-height: 3rem;
+
+    > a {
+      &:focus {
+        box-shadow: none;
+      }
+      &.active,
+      &.active .tab {
+        border-color: $blue;
+        color: $blue;
+      }
+    }
+    li {
+      > a &.active {
+        border-color: $blue;
+        color: $blue !important;
+      }
+    }
   }
 
   li {
     &:focus {
       box-shadow: none;
     }
-    &.is-active a,
-    &.is-active .tab {
+    &.active a,
+    &.active .tab {
       border-color: $blue;
       color: $blue;
     }

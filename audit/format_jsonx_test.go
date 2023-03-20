@@ -1,15 +1,16 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package audit
 
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
-
-	"errors"
-
-	"fmt"
 
 	"github.com/hashicorp/vault/helper/namespace"
 	"github.com/hashicorp/vault/sdk/helper/salt"
@@ -63,7 +64,7 @@ func TestFormatJSONx_formatRequest(t *testing.T) {
 					TTL: 60 * time.Second,
 				},
 				Headers: map[string][]string{
-					"foo": []string{"bar"},
+					"foo": {"bar"},
 				},
 				PolicyOverride: true,
 			},
@@ -100,7 +101,7 @@ func TestFormatJSONx_formatRequest(t *testing.T) {
 					TTL: 60 * time.Second,
 				},
 				Headers: map[string][]string{
-					"foo": []string{"bar"},
+					"foo": {"bar"},
 				},
 				PolicyOverride: true,
 			},
@@ -139,7 +140,7 @@ func TestFormatJSONx_formatRequest(t *testing.T) {
 
 		if !strings.HasSuffix(strings.TrimSpace(buf.String()), string(tc.ExpectedStr)) {
 			t.Fatalf(
-				"bad: %s\nResult:\n\n'%s'\n\nExpected:\n\n'%s'",
+				"bad: %s\nResult:\n\n%q\n\nExpected:\n\n%q",
 				name, strings.TrimSpace(buf.String()), string(tc.ExpectedStr))
 		}
 	}

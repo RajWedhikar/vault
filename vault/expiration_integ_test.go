@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package vault_test
 
 import (
@@ -164,5 +167,4 @@ func TestExpiration_RenewToken_TestCluster(t *testing.T) {
 	if ttl < 4*time.Second {
 		t.Fatal("expected ttl value to be around 5s")
 	}
-
 }

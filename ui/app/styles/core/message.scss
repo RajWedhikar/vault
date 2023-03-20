@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 .message {
   background: $blue-010;
   border: 1px solid $blue-100;
@@ -106,6 +111,7 @@
 
 .message-inline {
   display: flex;
+  align-items: center;
   margin: 0 0 $spacing-l;
 
   .hs-icon {
@@ -119,8 +125,28 @@
   &.has-top {
     margin-top: 1rem;
   }
+
+  &.size-small {
+    font-size: $size-7;
+  }
+
+  &.padding-top {
+    padding-top: $size-8;
+  }
+
+  &.is-marginless {
+    margin-bottom: 0;
+  }
+
+  > p::first-letter {
+    text-transform: capitalize;
+  }
 }
 
 .has-text-highlight {
   color: $yellow-500;
+}
+
+.message.message-marginless {
+  margin: 0;
 }

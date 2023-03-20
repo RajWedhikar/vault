@@ -1,3 +1,8 @@
+/**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
 import { module, test } from 'qunit';
 import { setupRenderingTest } from 'ember-qunit';
 import { render } from '@ember/test-helpers';
@@ -12,20 +17,20 @@ const Permissions = Service.extend({
   },
 });
 
-module('Integration | Helper | has-permission', function(hooks) {
+module('Integration | Helper | has-permission', function (hooks) {
   setupRenderingTest(hooks);
-  hooks.beforeEach(function() {
+  hooks.beforeEach(function () {
     this.owner.register('service:permissions', Permissions);
     this.permissions = this.owner.lookup('service:permissions');
   });
 
-  test('it renders', async function(assert) {
+  test('it renders', async function (assert) {
     await render(hbs`{{#if (has-permission)}}Yes{{else}}No{{/if}}`);
 
-    assert.equal(this.element.textContent.trim(), 'No');
+    assert.dom(this.element).hasText('No');
     await run(() => {
       this.permissions.set('globPaths', { 'test/': { capabilities: ['update'] } });
     });
-    assert.equal(this.element.textContent.trim(), 'Yes', 'the helper re-computes when globPaths changes');
+    assert.dom(this.element).hasText('Yes', 'the helper re-computes when globPaths changes');
   });
 });

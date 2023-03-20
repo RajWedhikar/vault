@@ -1,4 +1,9 @@
 /**
+ * Copyright (c) HashiCorp, Inc.
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+/**
  * @module BoxRadio
  * BoxRadio components are used to display options for a radio selection.
  *
@@ -16,11 +21,13 @@
  * @param {string} [tooltipMessage=default] - The message that shows in the tooltip if the radio option is disabled
  */
 
-import Component from '@ember/component';
+import Component from '@glimmer/component';
 import layout from '../templates/components/box-radio';
+import { setComponentTemplate } from '@ember/component';
 
-export default Component.extend({
-  layout,
-  disabled: false,
-  tooltipMessage: 'This option is not available to you at this time.',
-});
+class BoxRadio extends Component {
+  disabled = false;
+  tooltipMessage = 'This option is not available to you at this time.';
+}
+
+export default setComponentTemplate(layout, BoxRadio);

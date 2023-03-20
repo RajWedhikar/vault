@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package file
 
 import (
@@ -63,7 +66,7 @@ func TestFileSink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode() != os.FileMode(0640) {
+	if fi.Mode() != os.FileMode(0o640) {
 		t.Fatalf("wrong file mode was detected at %s", path)
 	}
 	err = file.Close()
@@ -93,7 +96,7 @@ func testFileSinkMode(t *testing.T, log hclog.Logger) (*sink.SinkConfig, string)
 		Logger: log.Named("sink.file"),
 		Config: map[string]interface{}{
 			"path": path,
-			"mode": 0644,
+			"mode": 0o644,
 		},
 	}
 
@@ -129,7 +132,7 @@ func TestFileSinkMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi.Mode() != os.FileMode(0644) {
+	if fi.Mode() != os.FileMode(0o644) {
 		t.Fatalf("wrong file mode was detected at %s", path)
 	}
 

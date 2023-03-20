@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package okta
 
 import (
@@ -68,7 +71,6 @@ func (b *backend) Group(ctx context.Context, s logical.Storage, n string) (*Grou
 		entries, err := groupList(ctx, s)
 		if err != nil {
 			return nil, "", err
-
 		}
 
 		for _, groupName := range entries {

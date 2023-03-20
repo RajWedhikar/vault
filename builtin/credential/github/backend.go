@@ -1,11 +1,14 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package github
 
 import (
 	"context"
+	"net/url"
 
 	"github.com/google/go-github/github"
 	cleanhttp "github.com/hashicorp/go-cleanhttp"
-	"github.com/hashicorp/vault/helper/mfa"
 	"github.com/hashicorp/vault/sdk/framework"
 	"github.com/hashicorp/vault/sdk/logical"
 	"golang.org/x/oauth2"
@@ -40,15 +43,12 @@ func Backend() *backend {
 		Help: backendHelp,
 
 		PathsSpecial: &logical.Paths{
-			Root: mfa.MFARootPaths(),
 			Unauthenticated: []string{
 				"login",
 			},
 		},
 
-		Paths: append([]*framework.Path{
-			pathConfig(&b),
-		}, append(allPaths, mfa.MFAPaths(b.Backend, pathLogin(&b))...)...),
+		Paths:       append([]*framework.Path{pathConfig(&b), pathLogin(&b)}, allPaths...),
 		AuthRenew:   b.pathLoginRenew,
 		BackendType: logical.TypeCredential,
 	}
@@ -73,7 +73,14 @@ func (b *backend) Client(token string) (*github.Client, error) {
 		tc = oauth2.NewClient(ctx, &tokenSource{Value: token})
 	}
 
-	return github.NewClient(tc), nil
+	client := github.NewClient(tc)
+	emptyUrl, err := url.Parse("")
+	if err != nil {
+		return nil, err
+	}
+	client.UploadURL = emptyUrl
+
+	return client, nil
 }
 
 // tokenSource is an oauth2.TokenSource implementation.

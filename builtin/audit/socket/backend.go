@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package socket
 
 import (
@@ -9,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	multierror "github.com/hashicorp/go-multierror"
+	"github.com/hashicorp/go-multierror"
+	"github.com/hashicorp/go-secure-stdlib/parseutil"
 	"github.com/hashicorp/vault/audit"
-	"github.com/hashicorp/vault/sdk/helper/parseutil"
 	"github.com/hashicorp/vault/sdk/helper/salt"
 	"github.com/hashicorp/vault/sdk/logical"
 )
@@ -73,12 +76,22 @@ func Factory(ctx context.Context, conf *audit.BackendConfig) (audit.Backend, err
 		logRaw = b
 	}
 
+	elideListResponses := false
+	if elideListResponsesRaw, ok := conf.Config["elide_list_responses"]; ok {
+		value, err := strconv.ParseBool(elideListResponsesRaw)
+		if err != nil {
+			return nil, err
+		}
+		elideListResponses = value
+	}
+
 	b := &Backend{
 		saltConfig: conf.SaltConfig,
 		saltView:   conf.SaltView,
 		formatConfig: audit.FormatterConfig{
-			Raw:          logRaw,
-			HMACAccessor: hmacAccessor,
+			Raw:                logRaw,
+			HMACAccessor:       hmacAccessor,
+			ElideListResponses: elideListResponses,
 		},
 
 		writeDuration: writeDuration,
@@ -177,6 +190,30 @@ func (b *Backend) LogResponse(ctx context.Context, in *logical.LogInput) error {
 	return err
 }
 
+func (b *Backend) LogTestMessage(ctx context.Context, in *logical.LogInput, config map[string]string) error {
+	var buf bytes.Buffer
+	temporaryFormatter := audit.NewTemporaryFormatter(config["format"], config["prefix"])
+	if err := temporaryFormatter.FormatRequest(ctx, &buf, b.formatConfig, in); err != nil {
+		return err
+	}
+
+	b.Lock()
+	defer b.Unlock()
+
+	err := b.write(ctx, buf.Bytes())
+	if err != nil {
+		rErr := b.reconnect(ctx)
+		if rErr != nil {
+			err = multierror.Append(err, rErr)
+		} else {
+			// Try once more after reconnecting
+			err = b.write(ctx, buf.Bytes())
+		}
+	}
+
+	return err
+}
+
 func (b *Backend) write(ctx context.Context, buf []byte) error {
 	if b.connection == nil {
 		if err := b.reconnect(ctx); err != nil {
@@ -194,7 +231,7 @@ func (b *Backend) write(ctx context.Context, buf []byte) error {
 		return err
 	}
 
-	return err
+	return nil
 }
 
 func (b *Backend) reconnect(ctx context.Context) error {
@@ -203,8 +240,11 @@ func (b *Backend) reconnect(ctx context.Context) error {
 		b.connection = nil
 	}
 
+	timeoutContext, cancel := context.WithTimeout(ctx, b.writeDuration)
+	defer cancel()
+
 	dialer := net.Dialer{}
-	conn, err := dialer.DialContext(ctx, b.socketType, b.address)
+	conn, err := dialer.DialContext(timeoutContext, b.socketType, b.address)
 	if err != nil {
 		return err
 	}

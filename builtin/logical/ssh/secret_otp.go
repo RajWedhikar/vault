@@ -1,3 +1,6 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package ssh
 
 import (
@@ -14,7 +17,7 @@ func secretOTP(b *backend) *framework.Secret {
 	return &framework.Secret{
 		Type: SecretOTPType,
 		Fields: map[string]*framework.FieldSchema{
-			"otp": &framework.FieldSchema{
+			"otp": {
 				Type:        framework.TypeString,
 				Description: "One time password",
 			},

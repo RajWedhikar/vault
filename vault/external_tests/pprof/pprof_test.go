@@ -1,6 +1,10 @@
+// Copyright (c) HashiCorp, Inc.
+// SPDX-License-Identifier: MPL-2.0
+
 package pprof
 
 import (
+	"context"
 	"encoding/json"
 	"io/ioutil"
 	"net/http"
@@ -9,14 +13,19 @@ import (
 	"testing"
 
 	"github.com/hashicorp/go-cleanhttp"
+	"github.com/hashicorp/vault/api"
 	vaulthttp "github.com/hashicorp/vault/http"
+	"github.com/hashicorp/vault/internalshared/configutil"
+	"github.com/hashicorp/vault/sdk/helper/testhelpers/schema"
 	"github.com/hashicorp/vault/vault"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/net/http2"
 )
 
 func TestSysPprof(t *testing.T) {
 	cluster := vault.NewTestCluster(t, nil, &vault.TestClusterOptions{
-		HandlerFunc: vaulthttp.Handler,
+		HandlerFunc:             vaulthttp.Handler,
+		RequestResponseCallback: schema.ResponseValidatingCallback(t),
 	})
 	cluster.Start()
 	defer cluster.Cleanup()
@@ -26,7 +35,7 @@ func TestSysPprof(t *testing.T) {
 	client := cluster.Cores[0].Client
 
 	transport := cleanhttp.DefaultPooledTransport()
-	transport.TLSClientConfig = cluster.Cores[0].TLSConfig.Clone()
+	transport.TLSClientConfig = cluster.Cores[0].TLSConfig()
 	if err := http2.ConfigureTransport(transport); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +137,7 @@ func TestSysPprof_MaxRequestDuration(t *testing.T) {
 	client := cluster.Cores[0].Client
 
 	transport := cleanhttp.DefaultPooledTransport()
-	transport.TLSClientConfig = cluster.Cores[0].TLSConfig.Clone()
+	transport.TLSClientConfig = cluster.Cores[0].TLSConfig()
 	if err := http2.ConfigureTransport(transport); err != nil {
 		t.Fatal(err)
 	}
@@ -168,6 +177,45 @@ func TestSysPprof_MaxRequestDuration(t *testing.T) {
 		t.Fatalf("expected error response, got: %v", httpResp)
 	}
 	if len(errs) == 0 || !strings.Contains(errs[0].(string), "exceeds max request duration") {
-		t.Fatalf("unexptected error returned: %v", errs)
+		t.Fatalf("unexpected error returned: %v", errs)
 	}
+}
+
+func TestSysPprof_Standby(t *testing.T) {
+	cluster := vault.NewTestCluster(t, &vault.CoreConfig{
+		DisablePerformanceStandby: true,
+	}, &vault.TestClusterOptions{
+		HandlerFunc: vaulthttp.Handler,
+		DefaultHandlerProperties: vault.HandlerProperties{
+			ListenerConfig: &configutil.Listener{
+				Profiling: configutil.ListenerProfiling{
+					UnauthenticatedPProfAccess: true,
+				},
+			},
+		},
+	})
+	cluster.Start()
+	defer cluster.Cleanup()
+
+	pprof := func(client *api.Client) (string, error) {
+		req := client.NewRequest("GET", "/v1/sys/pprof/cmdline")
+		resp, err := client.RawRequestWithContext(context.Background(), req)
+		if err != nil {
+			return "", err
+		}
+		defer resp.Body.Close()
+
+		data, err := ioutil.ReadAll(resp.Body)
+		return string(data), err
+	}
+
+	cmdline, err := pprof(cluster.Cores[0].Client)
+	require.Nil(t, err)
+	require.NotEmpty(t, cmdline)
+	t.Log(cmdline)
+
+	cmdline, err = pprof(cluster.Cores[1].Client)
+	require.Nil(t, err)
+	require.NotEmpty(t, cmdline)
+	t.Log(cmdline)
 }
